@@ -8,8 +8,8 @@
   "commands": {
     "start": {
       "description": "Start the service",
-      "supports": ["host"],
-      "defaultMode": "host"
+      "supports": ["host", "start"],
+      "defaultMode": "start"
     },
     "stop": {
       "description": "Stop the service",

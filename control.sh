@@ -121,6 +121,10 @@ cmd_start() {
         
         mkdir -p "${HOME}/Library/LaunchAgents"
         
+        # Get actual node path
+        local node_path
+        node_path=$(which node)
+        
         cat > "$plist_path" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -130,7 +134,7 @@ cmd_start() {
     <string>com.opencode.telegram</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/node</string>
+        <string>${node_path}</string>
         <string>${SCRIPT_DIR}/dist/standalone.js</string>
     </array>
     <key>WorkingDirectory</key>
@@ -138,7 +142,13 @@ cmd_start() {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>TELEGRAM_BOT_TOKEN</key>
+        <string>${TELEGRAM_BOT_TOKEN:-}</string>
+        <key>OPENCODE_PASSWORD</key>
+        <string>${OPENCODE_PASSWORD:-}</string>
+        <key>OPENCODE_SERVER_URL</key>
+        <string>${OPENCODE_SERVER_URL:-http://localhost:4096}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -152,24 +162,35 @@ cmd_start() {
 </plist>
 EOF
         
-        # Export env vars for the service
-        launchctl setenv TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN:-}"
-        launchctl setenv OPENCODE_PASSWORD "${OPENCODE_PASSWORD:-}"
-        launchctl setenv OPENCODE_SERVER_URL "${OPENCODE_SERVER_URL:-http://localhost:4096}"
+        # Unload if already loaded
+        launchctl unload "$plist_path" 2>/dev/null || true
         
-        launchctl load "$plist_path" 2>/dev/null || true
-        launchctl start com.opencode.telegram 2>/dev/null || true
+        # Load the plist
+        if launchctl load "$plist_path" 2>/dev/null; then
+            print_success "Service loaded"
+        else
+            # Try modern launchctl for macOS 11+
+            launchctl bootstrap user/$(id - u) "$plist_path" 2>/dev/null || {
+                print_error "Failed to load service"
+                exit 1
+            }
+        fi
         
         # Give it a moment to start
         sleep 2
         
-        # Get PID
-        local pid
-        pid=$(launchctl list | grep com.opencode.telegram | awk '{print $1}')
-        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
-            echo "$pid" > "$pid_file"
-            print_success "Started (PID: $pid)"
-            print_info "Logs: tail -f $log_file"
+        # Check if running
+        if launchctl list | grep -q "com.opencode.telegram"; then
+            local pid
+            pid=$(launchctl list | grep com.opencode.telegram | awk '{print $1}')
+            if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+                echo "$pid" > "$pid_file"
+                print_success "Started (PID: $pid)"
+                print_info "Logs: tail -f $log_file"
+            else
+                print_success "Service started"
+                print_info "Logs: tail -f $log_file"
+            fi
         else
             print_error "Failed to start"
             exit 1

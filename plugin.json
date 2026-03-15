@@ -8,16 +8,16 @@
   "commands": {
     "start": {
       "description": "Start the service",
-      "supports": ["host", "docker"],
+      "supports": ["host"],
       "defaultMode": "host"
     },
     "stop": {
       "description": "Stop the service",
-      "supports": ["host", "docker"]
+      "supports": ["host"]
     },
     "restart": {
       "description": "Restart the service",
-      "supports": ["host", "docker"]
+      "supports": ["host"]
     },
     "status": {
       "description": "Check service status"
@@ -50,12 +50,6 @@
       "stopCommand": "./control.sh stop",
       "statusCommand": "./control.sh status",
       "logsCommand": "./control.sh logs"
-    },
-    "docker": {
-      "startCommand": "./control.sh docker",
-      "stopCommand": "docker-compose down",
-      "statusCommand": "docker-compose ps",
-      "logsCommand": "docker-compose logs -f"
     }
   }
 }

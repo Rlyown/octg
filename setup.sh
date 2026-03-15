@@ -91,7 +91,7 @@ opencode_password="${opencode_password:-$OPENCODE_PASSWORD}"
 # Step 3: Workspace Path
 echo ""
 echo -e "${BLUE}Step 3: Workspace Directory${NC}"
-echo "Your project directory (mounted to /workspace in container)"
+echo "Your project directory"
 read -p "Path (default: ./workspace): " workspace_input
 workspace_path="${workspace_input:-${WORKSPACE_PATH:-./workspace}}"
 WORKSPACE_PATH=$(expand_path "$workspace_path")
@@ -181,5 +181,4 @@ echo -e "${GREEN}✓ Configuration saved!${NC}"
 echo ""
 echo "Commands:"
 echo "  ./control.sh host   - Start locally"
-echo "  ./control.sh docker - Start with Docker"
 echo "  ./control.sh status - Check status"

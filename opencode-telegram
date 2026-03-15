@@ -120,7 +120,7 @@ delegate_control() {
     shift
     
     case "$cmd" in
-        host|docker|start|status|stop|logs|restart|shell|update|pair|whitelist|setup|help)
+        host|start|status|stop|logs|restart|update|pair|whitelist|setup|help)
             cd "$PLUGIN_DIR"
             exec ./control.sh "$cmd" "$@"
             ;;
@@ -163,17 +163,15 @@ cmd_quickstart() {
         # Show quick actions
         echo "Quick Actions:"
         echo "  1. Start locally      : $SCRIPT_NAME host"
-        echo "  2. Start with Docker  : $SCRIPT_NAME docker"
-        echo "  3. Generate pair code : $SCRIPT_NAME pair"
-        echo "  4. Check status       : $SCRIPT_NAME status"
+        echo "  2. Generate pair code : $SCRIPT_NAME pair"
+        echo "  3. Check status       : $SCRIPT_NAME status"
         echo ""
-        
-        read -p "What would you like to do? (1-4, or 'q' to quit): " action
+
+        read -p "What would you like to do? (1-3, or 'q' to quit): " action
         case "$action" in
             1) exec "$0" host ;;
-            2) exec "$0" docker ;;
-            3) exec "$0" pair ;;
-            4) exec "$0" status ;;
+            2) exec "$0" pair ;;
+            3) exec "$0" status ;;
             q|Q) exit 0 ;;
             *) echo "Invalid option"; exit 1 ;;
         esac
@@ -213,13 +211,6 @@ cmd_doctor() {
         echo -e "${GREEN}✓${NC} opencode: Installed"
     else
         echo -e "${YELLOW}⚠${NC} opencode: Not found (required for host mode)"
-    fi
-    
-    # Check Docker
-    if command -v docker &> /dev/null; then
-        echo -e "${GREEN}✓${NC} Docker: Installed"
-    else
-        echo -e "${YELLOW}⚠${NC} Docker: Not found (required for docker mode)"
     fi
     
     # Check configuration
@@ -287,7 +278,6 @@ show_help() {
     echo "  quickstart    Interactive setup wizard (default)"
     echo "  setup         Configure the plugin"
     echo "  host          Start in host mode"
-    echo "  docker        Start with Docker"
     echo "  status        Check service status"
     echo "  stop          Stop services"
     echo "  pair          Generate pairing code"
@@ -329,7 +319,7 @@ main() {
         help|-h|--help)
             show_help
             ;;
-        host|docker|start|status|stop|logs|restart|shell|update|pair|whitelist|setup)
+        host|start|status|stop|logs|restart|update|pair|whitelist|setup)
             delegate_control "$cmd" "$@"
             ;;
         *)

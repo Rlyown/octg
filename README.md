@@ -1,12 +1,11 @@
 # OpenCode Telegram Plugin
 
-Standalone Telegram Bot for OpenCode Server. Supports both Host deployment and Docker deployment with local configuration and project path mounting.
+Standalone Telegram Bot for OpenCode Server with host-based deployment.
 
 ## Features
 
 - 💻 **Standalone Mode**: Runs as independent Node.js application
 - 🔗 **HTTP API**: Connects to `opencode serve` via REST API
-- 🐳 **Docker Support**: Full Docker Compose setup
 - 📁 **Local Config Mount**: Uses your existing OpenCode configuration
 - 👥 **Multi-User**: Each Telegram user gets separate OpenCode session
 - 💾 **Persistent Sessions**: File-based or in-memory session storage
@@ -16,7 +15,6 @@ Standalone Telegram Bot for OpenCode Server. Supports both Host deployment and D
 ### 1. Prerequisites
 
 - Node.js 18+ (for host deployment)
-- Docker & Docker Compose (for docker deployment)
 - Telegram Bot Token ([@BotFather](https://t.me/botfather))
 - OpenCode installed (`opencode serve` available)
 
@@ -49,12 +47,12 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 OPENCODE_PASSWORD=your_opencode_password
 
 # Optional
-WORKSPACE_PATH=/path/to/your/project  # For Docker
+WORKSPACE_PATH=/path/to/your/project
 ```
 
-## Deployment Options
+## Deployment
 
-### Option A: Host Deployment (Local Development)
+### Host Deployment
 
 **Terminal 1 - Start OpenCode Server:**
 
@@ -77,62 +75,7 @@ export OPENCODE_PASSWORD="your-password"
 npm start
 ```
 
-### Option B: Docker Deployment (Production)
-
-**1. Configure environment:**
-
-```bash
-cp .env.example .env
-
-# Edit .env
-TELEGRAM_BOT_TOKEN=your_bot_token
-OPENCODE_PASSWORD=your_password
-WORKSPACE_PATH=/absolute/path/to/your/project
-```
-
-**2. Start services:**
-
-```bash
-docker-compose up -d
-```
-
-This will:
-- Start `opencode serve` in a container
-- Start Telegram Plugin in another container
-- Mount your local workspace to OpenCode
-- Mount your OpenCode config (optional)
-- Persist session data in Docker volume
-
-**3. View logs:**
-
-```bash
-# All services
-docker-compose logs -f
-
-# Just Telegram plugin
-docker-compose logs -f telegram-plugin
-
-# Just OpenCode
-docker-compose logs -f opencode
-```
-
-**4. Stop:**
-
-```bash
-docker-compose down
-```
-
-## Project Structure with Docker
-
-```
-your-project/
-├── .opencode/              # Your OpenCode config (mounted)
-├── src/                    # Your code (mounted)
-└── opencode-telegram-plugin/  # This plugin
-    ├── docker-compose.yml
-    ├── Dockerfile
-    └── .env
-```
+Use `atk plugins telegram setup` to write config, then `atk plugins telegram host` to run locally.
 
 ## Commands
 
@@ -163,7 +106,7 @@ your-project/
 | `OPENCODE_SERVER_URL` | OpenCode HTTP URL | `http://localhost:4096` |
 | `OPENCODE_PASSWORD` | Server password | Required |
 | `SESSION_STORAGE` | `memory` or `file` | `memory` |
-| `WORKSPACE_PATH` | Path to mount in Docker | `./workspace` |
+| `WORKSPACE_PATH` | Local workspace path for context | `./workspace` |
 | `CONFIG_PATH` | OpenCode config path | `~/.config/opencode` |
 
 ### Config File

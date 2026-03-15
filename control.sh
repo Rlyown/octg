@@ -6,25 +6,21 @@
 # Commands:
 #   setup      - Interactive configuration setup
 #   host       - Start in host mode (local development)
-#   docker     - Start with Docker/OrbStack
 #   status     - Check service status
 #   stop       - Stop all services
 #   logs       - View logs
 #   restart    - Restart services
-#   shell      - Open shell in container
 #   update     - Update and rebuild
 #
 # Examples:
 #   ./control.sh setup    # First time setup
 #   ./control.sh host     # Run locally
-#   ./control.sh docker   # Run in Docker
 #   ./control.sh status   # Check status
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="opencode-telegram"
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 
 GLOBAL_CONFIG_DIR="${HOME}/.config/agent-toolkits"
 GLOBAL_ENV_FILE="${GLOBAL_CONFIG_DIR}/opencode-telegram.env"
@@ -170,7 +166,7 @@ cmd_setup() {
     # Workspace Path
     echo ""
     echo -e "${CYAN}Step 3: Workspace Directory${NC}"
-    echo "Your project directory (mounted to /workspace in container)"
+    echo "Your project directory"
     read -p "Path (default: ./workspace): " workspace_path
     workspace_path="${workspace_path:-./workspace}"
     
@@ -278,7 +274,6 @@ EOF
     
     echo "Next steps:"
     echo "  ${cmd_prefix} host    - Run locally (requires opencode serve)"
-    echo "  ${cmd_prefix} docker  - Run with Docker/OrbStack"
     echo ""
 }
 
@@ -374,81 +369,6 @@ cmd_host() {
     cd "$SCRIPT_DIR" && node dist/standalone.js
 }
 
-# Docker command
-cmd_docker() {
-    print_header
-    
-    if [ ! -f "$ENV_FILE" ]; then
-        print_error "Configuration not found!"
-        echo ""
-        echo "Searched locations:"
-        echo "  - $GLOBAL_ENV_FILE"
-        echo "  - $LOCAL_ENV_FILE"
-        echo ""
-        print_info "The Telegram Plugin needs configuration before starting."
-        echo ""
-        read -p "Run setup now? (Y/n): " run_setup
-        if [[ ! "$run_setup" =~ ^[Nn]$ ]]; then
-            cmd_setup
-            exit 0
-        else
-            print_info "Setup cancelled. Run '$(get_cmd_prefix) setup' when ready."
-            exit 1
-        fi
-    fi
-    
-    load_env
-    
-    local runtime=""
-    local runtime_name=""
-    
-    if command -v orb &> /dev/null; then
-        runtime="docker"
-        runtime_name="OrbStack"
-        print_success "OrbStack detected"
-    elif command -v docker &> /dev/null; then
-        runtime="docker"
-        runtime_name="Docker"
-        print_info "Docker detected"
-    else
-        print_error "No container runtime found"
-        echo ""
-        echo "For macOS, we recommend OrbStack:"
-        echo "  brew install --cask orbstack"
-        echo ""
-        echo "Or install Docker Desktop:"
-        echo "  https://www.docker.com/products/docker-desktop"
-        echo ""
-        print_info "Alternatively, use '$(get_cmd_prefix) host' for local mode"
-        exit 1
-    fi
-    
-    echo ""
-    print_info "Starting with Docker..."
-    echo ""
-    
-    # Validate paths are absolute
-    if [[ ! "$WORKSPACE_PATH" = /* ]]; then
-        print_error "WORKSPACE_PATH must be absolute: $WORKSPACE_PATH"
-        print_info "Please run '$(get_cmd_prefix) setup' to fix"
-        exit 1
-    fi
-    
-    # Export for docker-compose
-    export WORKSPACE_PATH CONFIG_PATH DATA_PATH
-    
-    # Start services
-    docker-compose -f "$COMPOSE_FILE" --profile full up -d
-    
-    echo ""
-    print_success "Services started!"
-    echo ""
-    echo "Commands:"
-    echo "  $(get_cmd_prefix) status  - Check status"
-    echo "  $(get_cmd_prefix) logs    - View logs"
-    echo "  $(get_cmd_prefix) stop    - Stop services"
-}
-
 # Status command
 cmd_status() {
     print_header
@@ -467,28 +387,6 @@ cmd_status() {
     else
         print_warning ".env not configured"
         echo "  Run: $(get_cmd_prefix) setup"
-    fi
-    
-    echo ""
-    
-    # Check Docker containers
-    if command -v docker &> /dev/null; then
-        echo -e "${CYAN}Docker Containers${NC}"
-        echo "------------------------------"
-        
-        if docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -q "opencode"; then
-            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep "opencode"
-            echo ""
-            
-            # Check OpenCode health
-            if docker exec opencode-server wget -q --spider http://localhost:4096/global/health 2>/dev/null; then
-                print_success "OpenCode server: Healthy"
-            else
-                print_warning "OpenCode server: Starting..."
-            fi
-        else
-            print_info "No containers running"
-        fi
     fi
     
     echo ""
@@ -535,7 +433,6 @@ cmd_status() {
     echo "------------------------------"
     if [ -f "$ENV_FILE" ]; then
         echo "  $(get_cmd_prefix) host    - Start locally"
-        echo "  $(get_cmd_prefix) docker  - Start with Docker"
     fi
     echo "  $(get_cmd_prefix) setup   - Reconfigure"
 }
@@ -547,17 +444,6 @@ cmd_stop() {
     print_info "Stopping services..."
     echo ""
     
-    # Stop Docker containers
-    if command -v docker &> /dev/null; then
-        if docker ps | grep -q "opencode"; then
-            docker-compose -f "$COMPOSE_FILE" --profile full down
-            print_success "Docker containers stopped"
-        else
-            print_info "No Docker containers running"
-        fi
-    fi
-    
-    # Stop host mode
     if pgrep -f "node.*standalone.js" > /dev/null; then
         pkill -f "node.*standalone.js"
         print_success "Host mode process stopped"
@@ -569,14 +455,8 @@ cmd_stop() {
 
 # Logs command
 cmd_logs() {
-    if command -v docker &> /dev/null && docker ps | grep -q "opencode"; then
-        # Docker mode
-        docker-compose -f "$COMPOSE_FILE" logs -f
-    else
-        # Host mode - no persistent logs
-        print_warning "Host mode doesn't have persistent logs"
-        print_info "Use '$(get_cmd_prefix) host' to see logs in real-time"
-    fi
+    print_warning "Host mode doesn't have persistent logs"
+    print_info "Use '$(get_cmd_prefix) host' to see logs in real-time"
 }
 
 # Restart command
@@ -587,33 +467,7 @@ cmd_restart() {
     echo ""
     sleep 2
     
-    if command -v docker &> /dev/null && docker ps | grep -q "opencode"; then
-        cmd_docker
-    else
-        cmd_host
-    fi
-}
-
-# Shell command
-cmd_shell() {
-    if [ -z "$1" ]; then
-        echo "Usage: ./control.sh shell [opencode|telegram]"
-        exit 1
-    fi
-    
-    case "$1" in
-        opencode)
-            docker exec -it opencode-server sh
-            ;;
-        telegram)
-            docker exec -it opencode-telegram sh
-            ;;
-        *)
-            print_error "Unknown container: $1"
-            echo "Available: opencode, telegram"
-            exit 1
-            ;;
-    esac
+    cmd_host
 }
 
 # Update command
@@ -634,13 +488,9 @@ cmd_update() {
     # Rebuild
     cd "$SCRIPT_DIR" && npm run build
     
-    if command -v docker &> /dev/null; then
-        docker-compose -f "$COMPOSE_FILE" build
-    fi
-    
     print_success "Update complete!"
     echo ""
-    echo "Start with: $(get_cmd_prefix) docker or $(get_cmd_prefix) host"
+    echo "Start with: $(get_cmd_prefix) host"
 }
 
 # Pair command - generate pairing code
@@ -648,95 +498,53 @@ cmd_pair() {
     print_header
     
     local is_host_mode=false
-    local is_docker_mode=false
-    
     if pgrep -f "node.*standalone.js" > /dev/null 2>&1; then
         is_host_mode=true
     fi
     
-    if command -v docker &> /dev/null && docker ps --format "{{.Names}}" | grep -q "opencode-telegram"; then
-        is_docker_mode=true
-    fi
-    
-    if [[ "$is_host_mode" == "false" && "$is_docker_mode" == "false" ]]; then
+    if [[ "$is_host_mode" == "false" ]]; then
         print_error "Bot is not running"
-        print_info "Start with: $(get_cmd_prefix) host or $(get_cmd_prefix) docker"
+        print_info "Start with: $(get_cmd_prefix) host"
         exit 1
     fi
     
     cd "$SCRIPT_DIR"
-    
-    if [[ "$is_docker_mode" == "true" ]]; then
-        docker exec opencode-telegram node -e "
-            const fs = require('fs');
-            const crypto = require('crypto');
-            
-            const whitelistFile = '/app/data/whitelist.json';
-            let data = { users: [], groups: [], pairingCodes: [] };
-            
-            if (fs.existsSync(whitelistFile)) {
-                try {
-                    data = JSON.parse(fs.readFileSync(whitelistFile, 'utf8'));
-                } catch(e) {}
-            }
-            
-            const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
-            
-            data.pairingCodes.push({
-                code,
-                createdAt: now.toISOString(),
-                expiresAt: expiresAt.toISOString()
-            });
-            
-            fs.mkdirSync('/app/data', { recursive: true });
-            fs.writeFileSync(whitelistFile, JSON.stringify(data, null, 2));
-            
-            console.log('📋 New Pairing Code: ' + code);
-            console.log('');
-            console.log('Share this code with the user or group to authorize.');
-            console.log('They should send: /pair ' + code);
-            console.log('');
-            console.log('Valid for 2 minutes.');
-        "
-    else
-        load_env
-        local whitelist_file="${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}"
-        node -e "
-            const fs = require('fs');
-            const crypto = require('crypto');
-            
-            const whitelistFile = '$whitelist_file';
-            let data = { users: [], groups: [], pairingCodes: [] };
-            
-            if (fs.existsSync(whitelistFile)) {
-                try {
-                    data = JSON.parse(fs.readFileSync(whitelistFile, 'utf8'));
-                } catch(e) {}
-            }
-            
-            const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
-            
-            data.pairingCodes.push({
-                code,
-                createdAt: now.toISOString(),
-                expiresAt: expiresAt.toISOString()
-            });
-            
-            fs.mkdirSync(require('path').dirname(whitelistFile), { recursive: true });
-            fs.writeFileSync(whitelistFile, JSON.stringify(data, null, 2));
-            
-            console.log('📋 New Pairing Code: ' + code);
-            console.log('');
-            console.log('Share this code with the user or group to authorize.');
-            console.log('They should send: /pair ' + code);
-            console.log('');
-            console.log('Valid for 2 minutes.');
-        "
-    fi
+
+    load_env
+    local whitelist_file="${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}"
+    node -e "
+        const fs = require('fs');
+        const crypto = require('crypto');
+
+        const whitelistFile = '$whitelist_file';
+        let data = { users: [], groups: [], pairingCodes: [] };
+
+        if (fs.existsSync(whitelistFile)) {
+            try {
+                data = JSON.parse(fs.readFileSync(whitelistFile, 'utf8'));
+            } catch(e) {}
+        }
+
+        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
+
+        data.pairingCodes.push({
+            code,
+            createdAt: now.toISOString(),
+            expiresAt: expiresAt.toISOString()
+        });
+
+        fs.mkdirSync(require('path').dirname(whitelistFile), { recursive: true });
+        fs.writeFileSync(whitelistFile, JSON.stringify(data, null, 2));
+
+        console.log('📋 New Pairing Code: ' + code);
+        console.log('');
+        console.log('Share this code with the user or group to authorize.');
+        console.log('They should send: /pair ' + code);
+        console.log('');
+        console.log('Valid for 2 minutes.');
+    "
 }
 
 # Whitelist command - manage whitelist
@@ -829,12 +637,10 @@ cmd_help() {
     echo "Commands:"
     echo "  setup      Interactive configuration setup (run first)"
     echo "  host       Start in host mode (requires opencode serve)"
-    echo "  docker     Start with Docker/OrbStack"
     echo "  status     Check service status"
     echo "  stop       Stop all services"
-    echo "  logs       View logs (Docker mode only)"
+    echo "  logs       Explain how to view host-mode logs"
     echo "  restart    Restart services"
-    echo "  shell      Open shell in container (opencode|telegram)"
     echo "  update     Update and rebuild"
     echo "  pair       Generate pairing code for authorization"
     echo "  whitelist  Manage whitelist (list|remove)"
@@ -868,8 +674,8 @@ main() {
         host)
             cmd_host
             ;;
-        docker|start)
-            cmd_docker
+        start)
+            cmd_host
             ;;
         status)
             cmd_status
@@ -882,9 +688,6 @@ main() {
             ;;
         restart)
             cmd_restart
-            ;;
-        shell)
-            cmd_shell "$2"
             ;;
         pair)
             cmd_pair

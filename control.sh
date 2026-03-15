@@ -81,13 +81,7 @@ is_systemd_available() {
 
 # Background daemon management
 daemon_name="opencode-telegram"
-
-if is_macos; then
-    LOG_DIR="${HOME}/Library/Logs/opencode-telegram"
-else
-    LOG_DIR="${HOME}/.local/share/opencode-telegram/logs"
-fi
-
+LOG_DIR="${HOME}/.local/share/agent-toolkits/logs"
 mkdir -p "$LOG_DIR"
 pid_file="${LOG_DIR}/opencode-telegram.pid"
 log_file="${LOG_DIR}/opencode-telegram.log"

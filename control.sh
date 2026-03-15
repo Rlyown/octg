@@ -71,11 +71,6 @@ get_cmd_prefix() {
     fi
 }
 
-# Background daemon management
-daemon_name="opencode-telegram"
-pid_file="${SCRIPT_DIR}/.pid"
-log_file="${SCRIPT_DIR}/.log"
-
 is_macos() {
     [[ "$(uname -s)" == "Darwin" ]]
 }
@@ -83,6 +78,19 @@ is_macos() {
 is_systemd_available() {
     command -v systemctl > /dev/null 2>&1 && systemctl --user status > /dev/null 2>&1
 }
+
+# Background daemon management
+daemon_name="opencode-telegram"
+
+if is_macos; then
+    LOG_DIR="${HOME}/Library/Logs/opencode-telegram"
+else
+    LOG_DIR="${HOME}/.local/share/opencode-telegram/logs"
+fi
+
+mkdir -p "$LOG_DIR"
+pid_file="${LOG_DIR}/opencode-telegram.pid"
+log_file="${LOG_DIR}/opencode-telegram.log"
 
 cmd_start() {
     print_header

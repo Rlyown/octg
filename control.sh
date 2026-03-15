@@ -67,6 +67,14 @@ print_info() {
     echo -e "${CYAN}ℹ${NC} $1"
 }
 
+get_cmd_prefix() {
+    if [[ "${ATK_CALLER:-}" == "true" ]] || [[ "${0##*/}" == "opencode-telegram" ]]; then
+        echo "atk plugins telegram"
+    else
+        echo "./control.sh"
+    fi
+}
+
 check_env_file() {
     if [ ! -f "$ENV_FILE" ]; then
         print_error "Configuration not found!"
@@ -75,7 +83,7 @@ check_env_file() {
         echo "  - $GLOBAL_ENV_FILE"
         echo "  - $LOCAL_ENV_FILE"
         echo ""
-        print_info "Run './control.sh setup' first to configure"
+        print_info "Run '$(get_cmd_prefix) setup' first to configure"
         exit 1
     fi
 }
@@ -89,6 +97,8 @@ load_env() {
 # Setup command
 cmd_setup() {
     print_header
+    local cmd_prefix
+    cmd_prefix="$(get_cmd_prefix)"
     
     local setup_target="global"
     local target_env_file="$GLOBAL_ENV_FILE"
@@ -267,8 +277,8 @@ EOF
     fi
     
     echo "Next steps:"
-    echo "  ./control.sh host    - Run locally (requires opencode serve)"
-    echo "  ./control.sh docker  - Run with Docker/OrbStack"
+    echo "  ${cmd_prefix} host    - Run locally (requires opencode serve)"
+    echo "  ${cmd_prefix} docker  - Run with Docker/OrbStack"
     echo ""
 }
 
@@ -290,7 +300,7 @@ cmd_host() {
             cmd_setup
             exit 0
         else
-            print_info "Setup cancelled. Run './control.sh setup' when ready."
+            print_info "Setup cancelled. Run '$(get_cmd_prefix) setup' when ready."
             exit 1
         fi
     fi
@@ -382,7 +392,7 @@ cmd_docker() {
             cmd_setup
             exit 0
         else
-            print_info "Setup cancelled. Run './control.sh setup' when ready."
+            print_info "Setup cancelled. Run '$(get_cmd_prefix) setup' when ready."
             exit 1
         fi
     fi
@@ -409,7 +419,7 @@ cmd_docker() {
         echo "Or install Docker Desktop:"
         echo "  https://www.docker.com/products/docker-desktop"
         echo ""
-        print_info "Alternatively, use './control.sh host' for local mode"
+        print_info "Alternatively, use '$(get_cmd_prefix) host' for local mode"
         exit 1
     fi
     
@@ -420,7 +430,7 @@ cmd_docker() {
     # Validate paths are absolute
     if [[ ! "$WORKSPACE_PATH" = /* ]]; then
         print_error "WORKSPACE_PATH must be absolute: $WORKSPACE_PATH"
-        print_info "Please run './control.sh setup' to fix"
+        print_info "Please run '$(get_cmd_prefix) setup' to fix"
         exit 1
     fi
     
@@ -434,9 +444,9 @@ cmd_docker() {
     print_success "Services started!"
     echo ""
     echo "Commands:"
-    echo "  ./control.sh status  - Check status"
-    echo "  ./control.sh logs    - View logs"
-    echo "  ./control.sh stop    - Stop services"
+    echo "  $(get_cmd_prefix) status  - Check status"
+    echo "  $(get_cmd_prefix) logs    - View logs"
+    echo "  $(get_cmd_prefix) stop    - Stop services"
 }
 
 # Status command
@@ -456,7 +466,7 @@ cmd_status() {
         echo "  Data:      ${DATA_PATH:-Not set}"
     else
         print_warning ".env not configured"
-        echo "  Run: ./control.sh setup"
+        echo "  Run: $(get_cmd_prefix) setup"
     fi
     
     echo ""
@@ -524,10 +534,10 @@ cmd_status() {
     echo -e "${CYAN}Quick Actions${NC}"
     echo "------------------------------"
     if [ -f "$ENV_FILE" ]; then
-        echo "  ./control.sh host    - Start locally"
-        echo "  ./control.sh docker  - Start with Docker"
+        echo "  $(get_cmd_prefix) host    - Start locally"
+        echo "  $(get_cmd_prefix) docker  - Start with Docker"
     fi
-    echo "  ./control.sh setup   - Reconfigure"
+    echo "  $(get_cmd_prefix) setup   - Reconfigure"
 }
 
 # Stop command
@@ -565,7 +575,7 @@ cmd_logs() {
     else
         # Host mode - no persistent logs
         print_warning "Host mode doesn't have persistent logs"
-        print_info "Use './control.sh host' to see logs in real-time"
+        print_info "Use '$(get_cmd_prefix) host' to see logs in real-time"
     fi
 }
 
@@ -630,7 +640,7 @@ cmd_update() {
     
     print_success "Update complete!"
     echo ""
-    echo "Start with: ./control.sh docker or ./control.sh host"
+    echo "Start with: $(get_cmd_prefix) docker or $(get_cmd_prefix) host"
 }
 
 # Pair command - generate pairing code
@@ -650,7 +660,7 @@ cmd_pair() {
     
     if [[ "$is_host_mode" == "false" && "$is_docker_mode" == "false" ]]; then
         print_error "Bot is not running"
-        print_info "Start with: ./control.sh host or ./control.sh docker"
+        print_info "Start with: $(get_cmd_prefix) host or $(get_cmd_prefix) docker"
         exit 1
     fi
     
@@ -808,13 +818,9 @@ cmd_whitelist() {
 # Help
 cmd_help() {
     print_header
-    
-    local cmd_prefix="./control.sh"
-    local plugin_name="telegram"
-    
-    if [[ "${ATK_CALLER:-}" == "true" ]] || [[ "${0##*/}" == "opencode-telegram" ]]; then
-        cmd_prefix="atk plugins $plugin_name"
-    fi
+
+    local cmd_prefix
+    cmd_prefix="$(get_cmd_prefix)"
     
     echo "OpenCode Telegram Plugin - Telegram Bot for OpenCode"
     echo ""

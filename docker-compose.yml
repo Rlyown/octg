@@ -1,0 +1,134 @@
+version: '3.8'
+
+services:
+  opencode:
+    image: opencode/opencode:latest
+    container_name: opencode-server
+    profiles: ["full", "server"]
+    environment:
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
+    command:
+      - serve
+      - --port
+      - '4096'
+      - --hostname
+      - '0.0.0.0'
+    volumes:
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      - ${CONFIG_PATH:-~/.config/opencode}:/root/.config/opencode:ro
+      - ${DATA_PATH:-~/.local/share/opencode}:/root/.local/share/opencode
+      - shared-data:/shared
+    working_dir: /workspace
+    networks:
+      - opencode-network
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:4096/global/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  telegram-plugin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opencode-telegram
+    profiles: ["full", "bot"]
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
+      - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
+      - TELEGRAM_WEBHOOK_PORT=${TELEGRAM_WEBHOOK_PORT:-3000}
+      - TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
+      - OPENCODE_SERVER_URL=http://opencode:4096
+      - OPENCODE_USERNAME=${OPENCODE_USERNAME:-opencode}
+      - OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
+      - SESSION_STORAGE=${SESSION_STORAGE:-file}
+      - SESSION_FILE_PATH=/app/data/sessions.json
+      - SESSION_TTL=${SESSION_TTL:-86400}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - MAX_MESSAGE_LENGTH=${MAX_MESSAGE_LENGTH:-4000}
+      - CODE_BLOCK_TIMEOUT=${CODE_BLOCK_TIMEOUT:-120000}
+    volumes:
+      - telegram-data:/app/data
+      - shared-data:/shared
+    depends_on:
+      opencode:
+        condition: service_healthy
+    networks:
+      - opencode-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  telegram-plugin-only:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opencode-telegram-standalone
+    profiles: ["bot-only"]
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
+      - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
+      - TELEGRAM_WEBHOOK_PORT=${TELEGRAM_WEBHOOK_PORT:-3000}
+      - TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
+      - OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://host.docker.internal:4096}
+      - OPENCODE_USERNAME=${OPENCODE_USERNAME:-opencode}
+      - OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
+      - SESSION_STORAGE=${SESSION_STORAGE:-file}
+      - SESSION_FILE_PATH=/app/data/sessions.json
+      - SESSION_TTL=${SESSION_TTL:-86400}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - MAX_MESSAGE_LENGTH=${MAX_MESSAGE_LENGTH:-4000}
+      - CODE_BLOCK_TIMEOUT=${CODE_BLOCK_TIMEOUT:-120000}
+    volumes:
+      - telegram-data:/app/data
+      - shared-data:/shared
+    networks:
+      - opencode-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+volumes:
+  telegram-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data
+  
+  shared-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/shared
+
+networks:
+  opencode-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1450

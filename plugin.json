@@ -1,0 +1,61 @@
+{
+  "name": "octg",
+  "version": "1.0.0",
+  "displayName": "OpenCode Telegram",
+  "alias": ["telegram", "tg"],
+  "description": "Telegram Bot for OpenCode with pairing code authorization",
+  "type": "service",
+  "commands": {
+    "start": {
+      "description": "Start the service",
+      "supports": ["host", "docker"],
+      "defaultMode": "host"
+    },
+    "stop": {
+      "description": "Stop the service",
+      "supports": ["host", "docker"]
+    },
+    "restart": {
+      "description": "Restart the service",
+      "supports": ["host", "docker"]
+    },
+    "status": {
+      "description": "Check service status"
+    },
+    "logs": {
+      "description": "View service logs"
+    },
+    "config": {
+      "description": "Configure the plugin",
+      "interactive": true
+    },
+    "pair": {
+      "description": "Generate pairing code for authorization",
+      "pluginSpecific": true
+    },
+    "whitelist": {
+      "description": "Manage authorized users/groups",
+      "pluginSpecific": true,
+      "subcommands": ["list", "remove"]
+    }
+  },
+  "config": {
+    "files": [".env"],
+    "required": ["TELEGRAM_BOT_TOKEN"],
+    "optional": ["OPENCODE_PASSWORD", "WORKSPACE_PATH"]
+  },
+  "runtime": {
+    "host": {
+      "startCommand": "./control.sh host",
+      "stopCommand": "./control.sh stop",
+      "statusCommand": "./control.sh status",
+      "logsCommand": "./control.sh logs"
+    },
+    "docker": {
+      "startCommand": "./control.sh docker",
+      "stopCommand": "docker-compose down",
+      "statusCommand": "docker-compose ps",
+      "logsCommand": "docker-compose logs -f"
+    }
+  }
+}

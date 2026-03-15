@@ -71,6 +71,171 @@ get_cmd_prefix() {
     fi
 }
 
+# Background daemon management
+daemon_name="opencode-telegram"
+pid_file="${SCRIPT_DIR}/.pid"
+log_file="${SCRIPT_DIR}/.log"
+
+is_macos() {
+    [[ "$(uname -s)" == "Darwin" ]]
+}
+
+is_systemd_available() {
+    command -v systemctl > /dev/null 2>&1 && systemctl --user status > /dev/null 2>&1
+}
+
+cmd_start() {
+    print_header
+    
+    if [ ! -f "$ENV_FILE" ]; then
+        print_error "Configuration not found!"
+        print_info "Run '$(get_cmd_prefix) setup' first"
+        exit 1
+    fi
+    
+    load_env
+    
+    # Check if already running
+    if [ -f "$pid_file" ]; then
+        local pid
+        pid=$(cat "$pid_file" 2>/dev/null)
+        if kill -0 "$pid" 2>/dev/null; then
+            print_warning "Already running (PID: $pid)"
+            exit 0
+        else
+            rm -f "$pid_file"
+        fi
+    fi
+    
+    # Check if compiled
+    if [ ! -f "${SCRIPT_DIR}/dist/standalone.js" ]; then
+        print_warning "Compiled code not found, building..."
+        cd "$SCRIPT_DIR" && npm run build
+    fi
+    
+    print_info "Starting in background mode..."
+    
+    if is_macos; then
+        # macOS: Use launchd
+        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.telegram.plist"
+        
+        mkdir -p "${HOME}/Library/LaunchAgents"
+        
+        cat > "$plist_path" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.opencode.telegram</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>${SCRIPT_DIR}/dist/standalone.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${SCRIPT_DIR}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${log_file}</string>
+    <key>StandardErrorPath</key>
+    <string>${log_file}</string>
+</dict>
+</plist>
+EOF
+        
+        # Export env vars for the service
+        launchctl setenv TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN:-}"
+        launchctl setenv OPENCODE_PASSWORD "${OPENCODE_PASSWORD:-}"
+        launchctl setenv OPENCODE_SERVER_URL "${OPENCODE_SERVER_URL:-http://localhost:4096}"
+        
+        launchctl load "$plist_path" 2>/dev/null || true
+        launchctl start com.opencode.telegram 2>/dev/null || true
+        
+        # Give it a moment to start
+        sleep 2
+        
+        # Get PID
+        local pid
+        pid=$(launchctl list | grep com.opencode.telegram | awk '{print $1}')
+        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+            echo "$pid" > "$pid_file"
+            print_success "Started (PID: $pid)"
+            print_info "Logs: tail -f $log_file"
+        else
+            print_error "Failed to start"
+            exit 1
+        fi
+        
+    elif is_systemd_available; then
+        # Linux with systemd
+        local service_path="${HOME}/.config/systemd/user/opencode-telegram.service"
+        
+        mkdir -p "${HOME}/.config/systemd/user"
+        
+        cat > "$service_path" << EOF
+[Unit]
+Description=OpenCode Telegram Plugin
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${SCRIPT_DIR}
+ExecStart=/usr/bin/env node ${SCRIPT_DIR}/dist/standalone.js
+Restart=on-failure
+RestartSec=5
+Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+Environment=OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
+Environment=OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+
+[Install]
+WantedBy=default.target
+EOF
+        
+        systemctl --user daemon-reload
+        systemctl --user enable opencode-telegram
+        systemctl --user start opencode-telegram
+        
+        # Get PID
+        sleep 2
+        local pid
+        pid=$(systemctl --user show opencode-telegram --property=MainPID --value 2>/dev/null)
+        if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+            echo "$pid" > "$pid_file"
+            print_success "Started (PID: $pid)"
+            print_info "Logs: journalctl --user -u opencode-telegram -f"
+        else
+            print_error "Failed to start"
+            exit 1
+        fi
+        
+    else
+        # Linux without systemd: use nohup
+        nohup node "${SCRIPT_DIR}/dist/standalone.js" > "$log_file" 2>&1 &
+        local pid=$!
+        
+        # Verify it started
+        sleep 2
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "$pid" > "$pid_file"
+            print_success "Started (PID: $pid)"
+            print_info "Logs: tail -f $log_file"
+        else
+            print_error "Failed to start"
+            rm -f "$pid_file"
+            exit 1
+        fi
+    fi
+}
+
 check_env_file() {
     if [ ! -f "$ENV_FILE" ]; then
         print_error "Configuration not found!"
@@ -391,19 +556,76 @@ cmd_status() {
     
     echo ""
     
-    # Check host mode
-    echo -e "${CYAN}Host Mode${NC}"
-    echo "------------------------------"
-    if pgrep -f "node.*standalone.js" > /dev/null; then
-        print_success "Telegram Bot: Running (PID: $(pgrep -f "node.*standalone.js"))"
-    else
-        print_info "Telegram Bot: Not running"
+    # Check background mode (via pid file or systemd/launchd)
+    local bg_running=false
+    local bg_pid=""
+    
+    if is_macos; then
+        # macOS: check launchd
+        if launchctl list | grep -q "com.opencode.telegram"; then
+            bg_pid=$(launchctl list | grep com.opencode.telegram | awk '{print $1}')
+            if [ -n "$bg_pid" ] && [ "$bg_pid" != "-" ]; then
+                bg_running=true
+            fi
+        fi
+    elif is_systemd_available; then
+        # Linux with systemd
+        if systemctl --user is-active opencode-telegram > /dev/null 2>&1; then
+            bg_pid=$(systemctl --user show opencode-telegram --property=MainPID --value 2>/dev/null)
+            if [ -n "$bg_pid" ] && [ "$bg_pid" != "0" ]; then
+                bg_running=true
+            fi
+        fi
+    elif [ -f "$pid_file" ]; then
+        # Linux without systemd: check pid file
+        bg_pid=$(cat "$pid_file" 2>/dev/null)
+        if kill -0 "$bg_pid" 2>/dev/null; then
+            bg_running=true
+        else
+            rm -f "$pid_file"
+        fi
     fi
+    
+    # Check host mode (foreground)
+    local fg_running=false
+    local fg_pid=""
+    if pgrep -f "node.*standalone.js" > /dev/null 2>&1; then
+        fg_running=true
+        fg_pid=$(pgrep -f "node.*standalone.js" | head -1)
+    fi
+    
+    # Display status
+    echo -e "${CYAN}Background Mode${NC}"
+    echo "------------------------------"
+    if [ "$bg_running" = true ]; then
+        print_success "Telegram Bot: Running (PID: $bg_pid)"
+        if is_macos; then
+            print_info "Logs: tail -f $log_file"
+        elif is_systemd_available; then
+            print_info "Logs: journalctl --user -u opencode-telegram -f"
+        else
+            print_info "Logs: tail -f $log_file"
+        fi
+    else
+        print_info "Telegram Bot: Not running (background)"
+    fi
+    
+    echo ""
+    
+    echo -e "${CYAN}Foreground Mode${NC}"
+    echo "------------------------------"
+    if [ "$fg_running" = true ]; then
+        print_success "Telegram Bot: Running (PID: $fg_pid)"
+    else
+        print_info "Telegram Bot: Not running (foreground)"
+    fi
+    
+    echo ""
     
     # Check OpenCode server
     print_info "Checking OpenCode server..."
     
-    # Try without password first
+    load_env 2>/dev/null || true
     if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
         # No password required
         OPENCODE_AUTH=""
@@ -444,9 +666,42 @@ cmd_stop() {
     print_info "Stopping services..."
     echo ""
     
+    local stopped=false
+    
+    # Stop background mode
+    if is_macos; then
+        if launchctl list | grep -q "com.opencode.telegram"; then
+            launchctl stop com.opencode.telegram 2>/dev/null || true
+            launchctl unload "${HOME}/Library/LaunchAgents/com.opencode.telegram.plist" 2>/dev/null || true
+            print_success "Background service stopped"
+            stopped=true
+        fi
+    elif is_systemd_available; then
+        if systemctl --user is-active opencode-telegram > /dev/null 2>&1; then
+            systemctl --user stop opencode-telegram
+            print_success "Background service stopped"
+            stopped=true
+        fi
+    elif [ -f "$pid_file" ]; then
+        local pid
+        pid=$(cat "$pid_file" 2>/dev/null)
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            print_success "Background process stopped (PID: $pid)"
+            stopped=true
+        fi
+        rm -f "$pid_file"
+    fi
+    
+    # Stop foreground mode
     if pgrep -f "node.*standalone.js" > /dev/null; then
         pkill -f "node.*standalone.js"
-        print_success "Host mode process stopped"
+        print_success "Foreground process stopped"
+        stopped=true
+    fi
+    
+    if [ "$stopped" = false ]; then
+        print_info "No running processes found"
     fi
     
     echo ""
@@ -455,19 +710,43 @@ cmd_stop() {
 
 # Logs command
 cmd_logs() {
-    print_warning "Host mode doesn't have persistent logs"
-    print_info "Use '$(get_cmd_prefix) host' to see logs in real-time"
+    # Check if running in background
+    if is_macos; then
+        if launchctl list | grep -q "com.opencode.telegram"; then
+            print_info "Showing logs from background service (Ctrl+C to exit)..."
+            tail -f "$log_file" 2>/dev/null || print_error "Log file not found: $log_file"
+            return
+        fi
+    elif is_systemd_available; then
+        if systemctl --user is-active opencode-telegram > /dev/null 2>&1; then
+            print_info "Showing logs from systemd service (Ctrl+C to exit)..."
+            journalctl --user -u opencode-telegram -f
+            return
+        fi
+    elif [ -f "$log_file" ]; then
+        print_info "Showing logs from background process (Ctrl+C to exit)..."
+        tail -f "$log_file"
+        return
+    fi
+    
+    print_warning "No background logs found"
+    print_info "Use '$(get_cmd_prefix) host' to see logs in real-time (foreground mode)"
 }
 
 # Restart command
 cmd_restart() {
+    local mode="${1:-host}"
     cmd_stop
     echo ""
     echo "Restarting..."
     echo ""
     sleep 2
     
-    cmd_host
+    if [ "$mode" = "start" ]; then
+        cmd_start
+    else
+        cmd_host
+    fi
 }
 
 # Update command
@@ -636,11 +915,12 @@ cmd_help() {
     echo ""
     echo "Commands:"
     echo "  setup      Interactive configuration setup (run first)"
-    echo "  host       Start in host mode (requires opencode serve)"
+    echo "  host       Start in foreground mode (requires opencode serve)"
+    echo "  start      Start in background mode (macOS: launchd, Linux: systemd/nohup)"
     echo "  status     Check service status"
     echo "  stop       Stop all services"
-    echo "  logs       Explain how to view host-mode logs"
-    echo "  restart    Restart services"
+    echo "  logs       View logs (background mode only)"
+    echo "  restart    Restart services (foreground by default, use 'restart start' for background)"
     echo "  update     Update and rebuild"
     echo "  pair       Generate pairing code for authorization"
     echo "  whitelist  Manage whitelist (list|remove)"
@@ -654,10 +934,17 @@ cmd_help() {
     echo "Quick Start:"
     echo "  1. $cmd_prefix setup    # Configure"
     echo "  2. $cmd_prefix pair     # Generate pairing code"
-    echo "  3. $cmd_prefix host     # Start locally"
+    echo "  3. $cmd_prefix start    # Start in background"
     echo "  4. Send /pair <code> in Telegram"
     echo ""
+    echo "Or for foreground mode:"
+    echo "  $cmd_prefix host        # Start in foreground (Ctrl+C to stop)"
+    echo ""
     echo "Examples:"
+    echo "  $cmd_prefix start                   # Start in background"
+    echo "  $cmd_prefix status                  # Check if running"
+    echo "  $cmd_prefix logs                    # View background logs"
+    echo "  $cmd_prefix stop                    # Stop all instances"
     echo "  $cmd_prefix pair                    # Generate pairing code"
     echo "  $cmd_prefix whitelist               # Show whitelist"
     echo "  $cmd_prefix whitelist remove user 123456"
@@ -675,7 +962,7 @@ main() {
             cmd_host
             ;;
         start)
-            cmd_host
+            cmd_start
             ;;
         status)
             cmd_status

@@ -75,7 +75,7 @@ export OPENCODE_PASSWORD="your-password"
 npm start
 ```
 
-Use `atk plugins telegram setup` to write config, then `atk plugins telegram host` to run locally.
+Use `atk plugins telegram setup` to write config, then `atk plugins telegram start` to run in background (recommended), or `atk plugins telegram host` to run in foreground.
 
 ## Commands
 

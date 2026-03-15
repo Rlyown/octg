@@ -23,9 +23,39 @@ opencode serve --port 4096 --hostname 127.0.0.1
 
 ### 4. Start Telegram Plugin
 
+#### Option A: Background Mode (Recommended)
+
+```bash
+atk plugins telegram start
+```
+
+Background mode uses:
+- **macOS**: `launchd` via `~/Library/LaunchAgents/com.opencode.telegram.plist`
+- **Linux with systemd**: user service via `~/.config/systemd/user/opencode-telegram.service`
+- **Linux without systemd**: `nohup` with pid file
+
+Check status:
+```bash
+atk plugins telegram status
+```
+
+View logs:
+```bash
+atk plugins telegram logs
+```
+
+Stop:
+```bash
+atk plugins telegram stop
+```
+
+#### Option B: Foreground Mode
+
 ```bash
 atk plugins telegram host
 ```
+
+Foreground mode runs in the current terminal. Press `Ctrl+C` to stop.
 
 ## Makefile Commands
 

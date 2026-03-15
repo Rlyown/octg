@@ -730,9 +730,16 @@ cmd_whitelist() {
 cmd_help() {
     print_header
     
-    echo "Unified Control Script for OpenCode Telegram Plugin"
+    local cmd_prefix="./control.sh"
+    local plugin_name="telegram"
+    
+    if [[ "${ATK_CALLER:-}" == "true" ]] || [[ "${0##*/}" == "opencode-telegram" ]]; then
+        cmd_prefix="atk plugins $plugin_name"
+    fi
+    
+    echo "OpenCode Telegram Plugin - Telegram Bot for OpenCode"
     echo ""
-    echo "Usage: ./control.sh [command]"
+    echo "Usage: $cmd_prefix [command]"
     echo ""
     echo "Commands:"
     echo "  setup      Interactive configuration setup (run first)"
@@ -750,19 +757,19 @@ cmd_help() {
     echo ""
     echo "Security:"
     echo "  By default, only authorized users can use the bot."
-    echo "  Run './control.sh pair' to generate a pairing code."
-    echo "  New users must send '/pair <code>' to authorize."
+    echo "  Run '$cmd_prefix pair' to generate a pairing code."
+    echo "  New users must send '/pair <code>' in Telegram to authorize."
     echo ""
     echo "Quick Start:"
-    echo "  1. ./control.sh setup    # Configure"
-    echo "  2. ./control.sh pair     # Generate pairing code"
-    echo "  3. ./control.sh host     # Start locally"
+    echo "  1. $cmd_prefix setup    # Configure"
+    echo "  2. $cmd_prefix pair     # Generate pairing code"
+    echo "  3. $cmd_prefix host     # Start locally"
     echo "  4. Send /pair <code> in Telegram"
     echo ""
     echo "Examples:"
-    echo "  ./control.sh pair                    # Generate pairing code"
-    echo "  ./control.sh whitelist               # Show whitelist"
-    echo "  ./control.sh whitelist remove user 123456"
+    echo "  $cmd_prefix pair                    # Generate pairing code"
+    echo "  $cmd_prefix whitelist               # Show whitelist"
+    echo "  $cmd_prefix whitelist remove user 123456"
 }
 
 # Main

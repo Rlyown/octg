@@ -175,6 +175,9 @@ SESSION_STORAGE=file
 SESSION_FILE_PATH=/app/data/sessions.json
 SESSION_TTL=86400
 
+WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json
+PAIRING_CODE_TTL=2
+
 # Application Configuration
 LOG_LEVEL=info
 MAX_MESSAGE_LENGTH=4000
@@ -203,7 +206,21 @@ EOF
 # Host mode command
 cmd_host() {
     print_header
-    check_env_file
+    
+    if [ ! -f "$ENV_FILE" ]; then
+        print_error ".env file not found!"
+        print_info "The Telegram Plugin needs configuration before starting."
+        echo ""
+        read -p "Run setup now? (Y/n): " run_setup
+        if [[ ! "$run_setup" =~ ^[Nn]$ ]]; then
+            cmd_setup
+            exit 0
+        else
+            print_info "Setup cancelled. Run './control.sh setup' when ready."
+            exit 1
+        fi
+    fi
+    
     load_env
     
     print_info "Starting in HOST mode..."
@@ -276,21 +293,45 @@ cmd_host() {
 # Docker command
 cmd_docker() {
     print_header
-    check_env_file
-    load_env
     
-    # Check Docker availability
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker not found"
-        print_info "Install Docker or use './control.sh host' for local mode"
-        exit 1
+    if [ ! -f "$ENV_FILE" ]; then
+        print_error ".env file not found!"
+        print_info "The Telegram Plugin needs configuration before starting."
+        echo ""
+        read -p "Run setup now? (Y/n): " run_setup
+        if [[ ! "$run_setup" =~ ^[Nn]$ ]]; then
+            cmd_setup
+            exit 0
+        else
+            print_info "Setup cancelled. Run './control.sh setup' when ready."
+            exit 1
+        fi
     fi
     
-    # Check if OrbStack
+    load_env
+    
+    local runtime=""
+    local runtime_name=""
+    
     if command -v orb &> /dev/null; then
+        runtime="docker"
+        runtime_name="OrbStack"
         print_success "OrbStack detected"
+    elif command -v docker &> /dev/null; then
+        runtime="docker"
+        runtime_name="Docker"
+        print_info "Docker detected"
     else
-        print_info "Docker Desktop detected"
+        print_error "No container runtime found"
+        echo ""
+        echo "For macOS, we recommend OrbStack:"
+        echo "  brew install --cask orbstack"
+        echo ""
+        echo "Or install Docker Desktop:"
+        echo "  https://www.docker.com/products/docker-desktop"
+        echo ""
+        print_info "Alternatively, use './control.sh host' for local mode"
+        exit 1
     fi
     
     echo ""
@@ -517,48 +558,96 @@ cmd_update() {
 cmd_pair() {
     print_header
     
-    if ! pgrep -f "node.*standalone.js" > /dev/null; then
+    local is_host_mode=false
+    local is_docker_mode=false
+    
+    if pgrep -f "node.*standalone.js" > /dev/null 2>&1; then
+        is_host_mode=true
+    fi
+    
+    if command -v docker &> /dev/null && docker ps --format "{{.Names}}" | grep -q "opencode-telegram"; then
+        is_docker_mode=true
+    fi
+    
+    if [[ "$is_host_mode" == "false" && "$is_docker_mode" == "false" ]]; then
         print_error "Bot is not running"
         print_info "Start with: ./control.sh host or ./control.sh docker"
         exit 1
     fi
     
     cd "$SCRIPT_DIR"
-    node -e "
-        const fs = require('fs');
-        const crypto = require('crypto');
-        
-        // Simple whitelist manager inline
-        const whitelistFile = './data/whitelist.json';
-        let data = { users: [], groups: [], pairingCodes: [] };
-        
-        if (fs.existsSync(whitelistFile)) {
-            try {
-                data = JSON.parse(fs.readFileSync(whitelistFile, 'utf8'));
-            } catch(e) {}
-        }
-        
-        // Generate code
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-        const now = new Date();
-        const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
-        
-        data.pairingCodes.push({
-            code,
-            createdAt: now.toISOString(),
-            expiresAt: expiresAt.toISOString()
-        });
-        
-        fs.mkdirSync('./data', { recursive: true });
-        fs.writeFileSync(whitelistFile, JSON.stringify(data, null, 2));
-        
-        console.log('📋 New Pairing Code: ' + code);
-        console.log('');
-        console.log('Share this code with the user or group to authorize.');
-        console.log('They should send: /pair ' + code);
-        console.log('');
-        console.log('Valid for 2 minutes.');
-    "
+    
+    if [[ "$is_docker_mode" == "true" ]]; then
+        docker exec opencode-telegram node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            
+            const whitelistFile = '/app/data/whitelist.json';
+            let data = { users: [], groups: [], pairingCodes: [] };
+            
+            if (fs.existsSync(whitelistFile)) {
+                try {
+                    data = JSON.parse(fs.readFileSync(whitelistFile, 'utf8'));
+                } catch(e) {}
+            }
+            
+            const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
+            
+            data.pairingCodes.push({
+                code,
+                createdAt: now.toISOString(),
+                expiresAt: expiresAt.toISOString()
+            });
+            
+            fs.mkdirSync('/app/data', { recursive: true });
+            fs.writeFileSync(whitelistFile, JSON.stringify(data, null, 2));
+            
+            console.log('📋 New Pairing Code: ' + code);
+            console.log('');
+            console.log('Share this code with the user or group to authorize.');
+            console.log('They should send: /pair ' + code);
+            console.log('');
+            console.log('Valid for 2 minutes.');
+        "
+    else
+        load_env
+        local whitelist_file="${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}"
+        node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            
+            const whitelistFile = '$whitelist_file';
+            let data = { users: [], groups: [], pairingCodes: [] };
+            
+            if (fs.existsSync(whitelistFile)) {
+                try {
+                    data = JSON.parse(fs.readFileSync(whitelistFile, 'utf8'));
+                } catch(e) {}
+            }
+            
+            const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
+            
+            data.pairingCodes.push({
+                code,
+                createdAt: now.toISOString(),
+                expiresAt: expiresAt.toISOString()
+            });
+            
+            fs.mkdirSync(require('path').dirname(whitelistFile), { recursive: true });
+            fs.writeFileSync(whitelistFile, JSON.stringify(data, null, 2));
+            
+            console.log('📋 New Pairing Code: ' + code);
+            console.log('');
+            console.log('Share this code with the user or group to authorize.');
+            console.log('They should send: /pair ' + code);
+            console.log('');
+            console.log('Valid for 2 minutes.');
+        "
+    fi
 }
 
 # Whitelist command - manage whitelist

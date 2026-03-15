@@ -120,7 +120,7 @@ delegate_control() {
     shift
     
     case "$cmd" in
-        host|docker|start|status|stop|logs|restart|shell|update|pair|whitelist|setup)
+        host|docker|start|status|stop|logs|restart|shell|update|pair|whitelist|setup|help)
             cd "$PLUGIN_DIR"
             exec ./control.sh "$cmd" "$@"
             ;;

@@ -1,5 +1,6 @@
 import type { Context, Telegraf } from 'telegraf';
 import type { Message, Update } from 'telegraf/types';
+import { resolve } from 'path';
 import type { OpenCodeClient } from '../opencode/client.js';
 import type { SessionManager } from '../session/manager.js';
 import type { PluginConfig, TelegramSession } from '../types.js';
@@ -23,9 +24,13 @@ export class BotHandlers {
     this.opencode = opencode;
     this.sessions = sessions;
     this.config = config;
+    
+    const whitelistFile = config.app.whitelistFile || './data/whitelist.json';
+    const absoluteWhitelistFile = resolve(process.cwd(), whitelistFile);
+    
     this.whitelist = new WhitelistManager(
-      config.app.whitelistFile || './data/whitelist.json',
-      config.app.pairingCodeTtl || 30
+      absoluteWhitelistFile,
+      config.app.pairingCodeTtl || 2
     );
 
     this.setupHandlers();

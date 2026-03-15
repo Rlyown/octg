@@ -38,6 +38,8 @@ function getDefaultConfig(): PluginConfig {
       logLevel: 'info',
       maxMessageLength: 4000,
       codeBlockTimeout: 120000,
+      whitelistFile: './data/whitelist.json',
+      pairingCodeTtl: 2,
     },
   };
 }
@@ -98,6 +100,8 @@ function loadEnvConfig(): Partial<PluginConfig> {
   if (process.env.LOG_LEVEL) app.logLevel = process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error';
   if (process.env.MAX_MESSAGE_LENGTH) app.maxMessageLength = parseInt(process.env.MAX_MESSAGE_LENGTH, 10);
   if (process.env.CODE_BLOCK_TIMEOUT) app.codeBlockTimeout = parseInt(process.env.CODE_BLOCK_TIMEOUT, 10);
+  if (process.env.WHITELIST_FILE) app.whitelistFile = process.env.WHITELIST_FILE;
+  if (process.env.PAIRING_CODE_TTL) app.pairingCodeTtl = parseInt(process.env.PAIRING_CODE_TTL, 10);
 
   // Only add to config if we have any values
   if (Object.keys(telegram).length > 0) config.telegram = telegram as TelegramConfig;

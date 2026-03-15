@@ -25,7 +25,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="opencode-telegram"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-ENV_FILE="${SCRIPT_DIR}/.env"
+
+GLOBAL_CONFIG_DIR="${HOME}/.config/agent-toolkits"
+GLOBAL_ENV_FILE="${GLOBAL_CONFIG_DIR}/opencode-telegram.env"
+LOCAL_ENV_FILE="${SCRIPT_DIR}/.env"
+
+ENV_FILE="${LOCAL_ENV_FILE}"
+if [ -f "$GLOBAL_ENV_FILE" ]; then
+    ENV_FILE="$GLOBAL_ENV_FILE"
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -61,7 +69,12 @@ print_info() {
 
 check_env_file() {
     if [ ! -f "$ENV_FILE" ]; then
-        print_error ".env file not found!"
+        print_error "Configuration not found!"
+        echo ""
+        echo "Searched locations:"
+        echo "  - $GLOBAL_ENV_FILE"
+        echo "  - $LOCAL_ENV_FILE"
+        echo ""
         print_info "Run './control.sh setup' first to configure"
         exit 1
     fi
@@ -77,16 +90,55 @@ load_env() {
 cmd_setup() {
     print_header
     
-    if [ -f "$ENV_FILE" ]; then
-        print_warning ".env file already exists"
-        read -p "Overwrite? (y/N): " overwrite
+    local setup_target="global"
+    local target_env_file="$GLOBAL_ENV_FILE"
+    
+    if [ -f "$GLOBAL_ENV_FILE" ]; then
+        print_warning "Global config found: $GLOBAL_ENV_FILE"
+        read -p "Overwrite global config? (y/N): " overwrite
         if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
             print_info "Setup cancelled"
             exit 0
         fi
+        setup_target="global"
+        target_env_file="$GLOBAL_ENV_FILE"
+    elif [ -f "$LOCAL_ENV_FILE" ]; then
+        print_warning "Local config found: $LOCAL_ENV_FILE"
+        echo ""
+        echo "Choose configuration location:"
+        echo "  1. Global config (~/.config/agent-toolkits/) - RECOMMENDED, persists across reinstalls"
+        echo "  2. Local config (plugin directory) - tied to this installation"
+        read -p "Select (1/2, default: 1): " location_choice
+        
+        if [[ "$location_choice" == "2" ]]; then
+            setup_target="local"
+            target_env_file="$LOCAL_ENV_FILE"
+        else
+            setup_target="global"
+            target_env_file="$GLOBAL_ENV_FILE"
+        fi
+        
+        read -p "Overwrite existing config? (y/N): " overwrite
+        if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+            print_info "Setup cancelled"
+            exit 0
+        fi
+    else
+        echo "Choose configuration location:"
+        echo "  1. Global config (~/.config/agent-toolkits/) - RECOMMENDED, persists across reinstalls"
+        echo "  2. Local config (plugin directory) - tied to this installation"
+        read -p "Select (1/2, default: 1): " location_choice
+        
+        if [[ "$location_choice" == "2" ]]; then
+            setup_target="local"
+            target_env_file="$LOCAL_ENV_FILE"
+        else
+            setup_target="global"
+            target_env_file="$GLOBAL_ENV_FILE"
+        fi
     fi
     
-    print_info "Let's configure your OpenCode Telegram Plugin"
+    print_info "Configuring OpenCode Telegram Plugin ($setup_target mode)"
     echo ""
     
     # Telegram Bot Token
@@ -155,7 +207,8 @@ cmd_setup() {
     fi
     
     # Create .env
-    cat > "$ENV_FILE" << EOF
+    mkdir -p "$(dirname "$target_env_file")"
+    cat > "$target_env_file" << EOF
 # Telegram Configuration
 TELEGRAM_BOT_TOKEN=$bot_token
 TELEGRAM_MODE=polling
@@ -174,9 +227,18 @@ DATA_PATH=$DATA_PATH
 SESSION_STORAGE=file
 SESSION_FILE_PATH=/app/data/sessions.json
 SESSION_TTL=86400
+EOF
 
-WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json
-PAIRING_CODE_TTL=2
+    # Set WHITELIST_FILE based on config location
+    if [[ "$setup_target" == "global" ]]; then
+        echo "WHITELIST_FILE=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json" >> "$target_env_file"
+        echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
+    else
+        echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
+        echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
+    fi
+    
+    cat >> "$target_env_file" << EOF
 
 # Application Configuration
 LOG_LEVEL=info
@@ -185,7 +247,7 @@ CODE_BLOCK_TIMEOUT=120000
 EOF
     
     echo ""
-    print_success ".env file created!"
+    print_success "Configuration saved to: $target_env_file"
     
     # Create directories
     mkdir -p "${SCRIPT_DIR}/data"
@@ -197,6 +259,13 @@ EOF
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
     echo ""
+    
+    if [[ "$setup_target" == "global" ]]; then
+        echo "Configuration stored in: ~/.config/agent-toolkits/opencode-telegram.env"
+        echo "This will persist across plugin reinstalls."
+        echo ""
+    fi
+    
     echo "Next steps:"
     echo "  ./control.sh host    - Run locally (requires opencode serve)"
     echo "  ./control.sh docker  - Run with Docker/OrbStack"
@@ -208,7 +277,12 @@ cmd_host() {
     print_header
     
     if [ ! -f "$ENV_FILE" ]; then
-        print_error ".env file not found!"
+        print_error "Configuration not found!"
+        echo ""
+        echo "Searched locations:"
+        echo "  - $GLOBAL_ENV_FILE"
+        echo "  - $LOCAL_ENV_FILE"
+        echo ""
         print_info "The Telegram Plugin needs configuration before starting."
         echo ""
         read -p "Run setup now? (Y/n): " run_setup
@@ -295,7 +369,12 @@ cmd_docker() {
     print_header
     
     if [ ! -f "$ENV_FILE" ]; then
-        print_error ".env file not found!"
+        print_error "Configuration not found!"
+        echo ""
+        echo "Searched locations:"
+        echo "  - $GLOBAL_ENV_FILE"
+        echo "  - $LOCAL_ENV_FILE"
+        echo ""
         print_info "The Telegram Plugin needs configuration before starting."
         echo ""
         read -p "Run setup now? (Y/n): " run_setup

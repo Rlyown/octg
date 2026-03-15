@@ -87,7 +87,7 @@ opencode-telegram-plugin/
 ├── node_modules/             ✅ Dependencies
 ├── package.json              ✅ Project config
 ├── tsconfig.json             ✅ TypeScript config
-└── Dockerfile                ✅ Docker config
+└── package-lock.json         ✅ Dependency lockfile
 ```
 
 ### Compiled Output
@@ -120,8 +120,7 @@ To perform full integration testing, you need:
 ## Known Limitations
 
 1. **Webhook Mode**: Not yet implemented (returns error)
-2. **Docker**: Build test skipped (docker not available in test environment)
-3. **OpenCode Server**: Connection tested but server not running in test
+2. **OpenCode Server**: Connection tested but server not running in test
 
 ## Next Steps
 
@@ -130,7 +129,7 @@ To perform full integration testing, you need:
 3. ⏭️ Integration test - Requires:
    - Real Telegram Bot Token
    - Running OpenCode server
-4. ⏭️ Docker deployment test - Requires Docker environment
+4. ⏭️ Host integration test - Requires real OpenCode server and Telegram token
 
 ## Conclusion
 

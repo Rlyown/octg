@@ -694,7 +694,7 @@ export OPENCODE_PASSWORD="your-secure-password"
 node dist/standalone.js
 ```
 
-**Docker Compose 部署：**
+**Host 部署：**
 ```yaml
 version: '3.8'
 
@@ -880,7 +880,7 @@ export class HttpOpenCodeClient implements OpenCodeClient {
 - [ ] 命令白名单
 - [ ] 输入验证
 - [ ] Redis Session 存储（可选）
-- [ ] Docker 部署优化
+- [ ] Host 部署体验优化
 
 ---
 

@@ -119,12 +119,11 @@ export OPENCODE_PASSWORD="your-password"
 node dist/standalone.js
 ```
 
-### Docker 模式
+### Host 模式
 ```bash
 export TELEGRAM_BOT_TOKEN="your-token"
 export OPENCODE_PASSWORD="your-password"
-export WORKSPACE_PATH="/path/to/project"
-docker-compose up -d
+node dist/standalone.js
 ```
 
 ## 可用命令 (完整列表)

@@ -165,7 +165,7 @@ curl -u opencode:your-password http://localhost:4096/global/health
 # Should return: {"healthy":true,"version":"x.x.x"}
 ```
 
-**Docker: Workspace not found:**
+**Workspace not found:**
 - Ensure `WORKSPACE_PATH` in `.env` is an absolute path
 - Example: `/Users/username/projects/my-project`
 

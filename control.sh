@@ -78,6 +78,191 @@ is_macos() {
 is_systemd_available() {
     command -v systemctl > /dev/null 2>&1 && systemctl --user status > /dev/null 2>&1
 }
+setup_opencode_service() {
+    local opencode_path
+    opencode_path=$(which opencode)
+    
+    if is_macos; then
+        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
+        mkdir -p "${HOME}/Library/LaunchAgents"
+        cat > "$plist_path" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.opencode.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${opencode_path}</string>
+        <string>serve</string>
+        <string>--port</string>
+        <string>4096</string>
+        <string>--hostname</string>
+        <string>127.0.0.1</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>OPENCODE_SERVER_PASSWORD</key>
+        <string>${OPENCODE_PASSWORD:-}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${LOG_DIR}/opencode-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_DIR}/opencode-server.log</string>
+</dict>
+</plist>
+EOF
+        print_success "OpenCode server launchd service configured"
+    elif is_systemd_available; then
+        local service_path="${HOME}/.config/systemd/user/opencode-server.service"
+        mkdir -p "${HOME}/.config/systemd/user"
+        cat > "$service_path" << EOF
+[Unit]
+Description=OpenCode Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${opencode_path} serve --port 4096 --hostname 127.0.0.1
+Restart=on-failure
+RestartSec=5
+Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_PASSWORD:-}
+
+[Install]
+WantedBy=default.target
+EOF
+        systemctl --user daemon-reload
+        print_success "OpenCode server systemd service configured"
+    fi
+}
+
+start_opencode_service() {
+    if is_macos; then
+        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
+        if [ ! -f "$plist_path" ]; then
+            setup_opencode_service
+        fi
+        launchctl unload "$plist_path" 2>/dev/null || true
+        if launchctl load "$plist_path" 2>/dev/null; then
+            print_success "OpenCode server service loaded"
+        else
+            launchctl bootstrap user/$(id -u) "$plist_path" 2>/dev/null || {
+                print_error "Failed to load OpenCode server service"
+                return 1
+            }
+        fi
+    elif is_systemd_available; then
+        local service_path="${HOME}/.config/systemd/user/opencode-server.service"
+        if [ ! -f "$service_path" ]; then
+            setup_opencode_service
+        fi
+        systemctl --user enable opencode-server 2>/dev/null || true
+        systemctl --user start opencode-server
+        print_success "OpenCode server service started"
+    else
+        local opencode_path
+        opencode_path=$(which opencode)
+        nohup "$opencode_path" serve --port 4096 --hostname 127.0.0.1 > "${LOG_DIR}/opencode-server.log" 2>&1 &
+        echo $! > "${LOG_DIR}/opencode-server.pid"
+        print_success "OpenCode server started (nohup)"
+    fi
+}
+
+stop_opencode_service() {
+    if is_macos; then
+        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
+        if launchctl list | grep -q "com.opencode.server"; then
+            launchctl stop com.opencode.server 2>/dev/null || true
+            launchctl unload "$plist_path" 2>/dev/null || true
+            print_success "OpenCode server service stopped"
+        fi
+    elif is_systemd_available; then
+        if systemctl --user is-active opencode-server > /dev/null 2>&1; then
+            systemctl --user stop opencode-server
+            print_success "OpenCode server service stopped"
+        fi
+    else
+        if [ -f "${LOG_DIR}/opencode-server.pid" ]; then
+            local pid
+            pid=$(cat "${LOG_DIR}/opencode-server.pid" 2>/dev/null)
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+                print_success "OpenCode server stopped"
+            fi
+            rm -f "${LOG_DIR}/opencode-server.pid"
+        fi
+    fi
+    pkill -f "opencode serve" 2>/dev/null || true
+}
+
+
+
+check_and_start_opencode() {
+    local auto_start="${1:-false}"
+    
+    print_info "Checking OpenCode server..."
+    
+    if curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
+        local health
+        health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
+        local version
+        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        print_success "OpenCode server running (v${version})"
+        return 0
+    elif curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
+        local health
+        health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
+        local version
+        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        print_success "OpenCode server running (v${version}, no password)"
+        return 0
+    fi
+    
+    if [ "$auto_start" = "true" ]; then
+        print_warning "OpenCode server not running at ${OPENCODE_SERVER_URL}"
+        print_info "Starting OpenCode server automatically..."
+        
+        if ! command -v opencode &> /dev/null; then
+            print_error "opencode command not found"
+            print_info "Please install OpenCode: https://opencode.ai"
+            return 1
+        fi
+        
+        start_opencode_service
+        
+        print_info "Waiting for OpenCode server..."
+        local max_wait=30
+        local waited=0
+        while [ $waited -lt $max_wait ]; do
+            if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
+                local health
+                health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
+                local version
+                version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+                print_success "OpenCode server ready (v${version})"
+                return 0
+            fi
+            sleep 1
+            ((waited++))
+        done
+        
+        if ! curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
+            print_error "Failed to start OpenCode server"
+            return 1
+        fi
+    else
+        print_error "Cannot connect to OpenCode server at ${OPENCODE_SERVER_URL}"
+        print_info "Please ensure opencode serve is running"
+        return 1
+    fi
+}
 
 # Background daemon management
 daemon_name="opencode-telegram"
@@ -115,6 +300,8 @@ cmd_start() {
         cd "$SCRIPT_DIR" && npm run build
     fi
     
+    check_and_start_opencode true || exit 1
+    
     print_info "Starting in background mode..."
     
     if is_macos; then
@@ -151,6 +338,10 @@ cmd_start() {
         <string>${OPENCODE_PASSWORD:-}</string>
         <key>OPENCODE_SERVER_URL</key>
         <string>${OPENCODE_SERVER_URL:-http://localhost:4096}</string>
+        <key>WHITELIST_FILE</key>
+        <string>${WHITELIST_FILE:-${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json}</string>
+        <key>PAIRING_CODE_TTL</key>
+        <string>${PAIRING_CODE_TTL:-2}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -218,6 +409,8 @@ RestartSec=5
 Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 Environment=OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
 Environment=OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
+Environment=WHITELIST_FILE=${WHITELIST_FILE:-${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json}
+Environment=PAIRING_CODE_TTL=${PAIRING_CODE_TTL:-2}
 
 [Install]
 WantedBy=default.target
@@ -351,55 +544,6 @@ cmd_setup() {
     echo "Optional: Press Enter to skip"
     read -p "Password: " opencode_password
     
-    # Workspace Path
-    echo ""
-    echo -e "${CYAN}Step 3: Workspace Directory${NC}"
-    echo "Your project directory"
-    read -p "Path (default: ./workspace): " workspace_path
-    workspace_path="${workspace_path:-./workspace}"
-    
-    # Expand ~ to $HOME first
-    workspace_path="${workspace_path/#\~/$HOME}"
-    
-    # Expand to absolute path
-    if [[ "$workspace_path" = /* ]]; then
-        WORKSPACE_PATH="$workspace_path"
-    else
-        WORKSPACE_PATH="${SCRIPT_DIR}/${workspace_path}"
-    fi
-    
-    # Create workspace if not exists
-    if [ ! -d "$WORKSPACE_PATH" ]; then
-        print_warning "Directory does not exist: $WORKSPACE_PATH"
-        read -p "Create it? (y/N): " create_dir
-        if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-            mkdir -p "$WORKSPACE_PATH"
-            print_success "Created: $WORKSPACE_PATH"
-        fi
-    fi
-    
-    # Config Path
-    echo ""
-    echo -e "${CYAN}Step 4: OpenCode Config Path${NC}"
-    read -p "Config path (default: ~/.config/opencode): " config_path
-    CONFIG_PATH="${config_path:-$HOME/.config/opencode}"
-    
-    # Data Path
-    echo ""
-    echo -e "${CYAN}Step 5: OpenCode Data Path${NC}"
-    echo "This contains session database for /attach support"
-    read -p "Data path (default: ~/.local/share/opencode): " data_path
-    DATA_PATH="${data_path:-$HOME/.local/share/opencode}"
-    
-    # Check if data exists
-    if [ -f "$DATA_PATH/opencode.db" ]; then
-        db_size=$(ls -lh "$DATA_PATH/opencode.db" 2>/dev/null | awk '{print $5}')
-        print_success "Found session database: $db_size"
-    else
-        print_warning "Session database not found at $DATA_PATH"
-        print_info "Run 'opencode' first to initialize, or continue without /attach support"
-    fi
-    
     # Create .env
     mkdir -p "$(dirname "$target_env_file")"
     cat > "$target_env_file" << EOF
@@ -411,11 +555,6 @@ TELEGRAM_MODE=polling
 OPENCODE_SERVER_URL=http://localhost:4096
 OPENCODE_USERNAME=opencode
 OPENCODE_PASSWORD=$opencode_password
-
-# Paths (using absolute paths)
-WORKSPACE_PATH=$WORKSPACE_PATH
-CONFIG_PATH=$CONFIG_PATH
-DATA_PATH=$DATA_PATH
 
 # Session Configuration
 SESSION_STORAGE=file
@@ -499,55 +638,7 @@ cmd_host() {
         cd "$SCRIPT_DIR" && npm run build
     fi
     
-    # Check OpenCode server
-    print_info "Checking OpenCode server..."
-    if curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version})"
-    else
-        print_warning "OpenCode server not running at ${OPENCODE_SERVER_URL}"
-        echo ""
-        read -p "Start OpenCode server automatically? (Y/n): " start_opencode
-        
-        if [[ ! "$start_opencode" =~ ^[Nn]$ ]]; then
-            print_info "Starting OpenCode server..."
-            export OPENCODE_SERVER_PASSWORD="${OPENCODE_PASSWORD}"
-            
-            # Check if opencode command exists
-            if ! command -v opencode &> /dev/null; then
-                print_error "opencode command not found"
-                print_info "Please install OpenCode: https://opencode.ai"
-                exit 1
-            fi
-            
-            # Start OpenCode in background
-            opencode serve --port 4096 --hostname 127.0.0.1 &
-            OPENCODE_PID=$!
-            
-            # Wait for OpenCode to be ready
-            print_info "Waiting for OpenCode server..."
-            for i in {1..30}; do
-                if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-                    health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-                    version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-                    print_success "OpenCode server ready (v${version})"
-                    break
-                fi
-                sleep 1
-            done
-            
-            # Check if started successfully
-            if ! curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-                print_error "Failed to start OpenCode server"
-                exit 1
-            fi
-        else
-            print_error "OpenCode server is required"
-            print_info "Start it manually: opencode serve --port 4096"
-            exit 1
-        fi
-    fi
+    check_and_start_opencode true || exit 1
     
     echo ""
     print_info "Starting Telegram Bot..."
@@ -569,9 +660,6 @@ cmd_status() {
     if [ -f "$ENV_FILE" ]; then
         load_env
         print_success ".env configured"
-        echo "  Workspace: ${WORKSPACE_PATH:-Not set}"
-        echo "  Config:    ${CONFIG_PATH:-Not set}"
-        echo "  Data:      ${DATA_PATH:-Not set}"
     else
         print_warning ".env not configured"
         echo "  Run: $(get_cmd_prefix) setup"
@@ -645,7 +733,41 @@ cmd_status() {
     
     echo ""
     
-    # Check OpenCode server
+    echo -e "${CYAN}OpenCode Server Service${NC}"
+    echo "------------------------------"
+    local opencode_service_running=false
+    if is_macos; then
+        if launchctl list | grep -q "com.opencode.server"; then
+            print_success "OpenCode server service: Loaded (launchd)"
+            opencode_service_running=true
+        else
+            print_info "OpenCode server service: Not loaded"
+        fi
+    elif is_systemd_available; then
+        if systemctl --user is-active opencode-server > /dev/null 2>&1; then
+            print_success "OpenCode server service: Active (systemd)"
+            opencode_service_running=true
+        else
+            print_info "OpenCode server service: Inactive"
+        fi
+    else
+        if [ -f "${LOG_DIR}/opencode-server.pid" ]; then
+            local opencode_pid
+            opencode_pid=$(cat "${LOG_DIR}/opencode-server.pid" 2>/dev/null)
+            if kill -0 "$opencode_pid" 2>/dev/null; then
+                print_success "OpenCode server: Running (PID: $opencode_pid)"
+                opencode_service_running=true
+            else
+                print_info "OpenCode server: Not running"
+                rm -f "${LOG_DIR}/opencode-server.pid"
+            fi
+        else
+            print_info "OpenCode server: Not running"
+        fi
+    fi
+    
+    echo ""
+    
     print_info "Checking OpenCode server..."
     
     load_env 2>/dev/null || true
@@ -722,6 +844,9 @@ cmd_stop() {
         print_success "Foreground process stopped"
         stopped=true
     fi
+    
+    stop_opencode_service
+    stopped=true
     
     if [ "$stopped" = false ]; then
         print_info "No running processes found"

@@ -9,6 +9,48 @@ import type {
   HealthResponse,
 } from '../types.js';
 
+interface Agent {
+  name: string;
+  description?: string;
+  slug?: string;
+}
+
+interface ModelInfo {
+  provider: string;
+  models: string[];
+}
+
+interface ConfigProviders {
+  providers: ModelInfo[];
+  default: Record<string, string>;
+}
+
+interface SearchResult {
+  path: string;
+  lines: Array<{
+    line_number: number;
+    content: string;
+  }>;
+}
+
+interface SessionDiff {
+  path: string;
+  change: 'added' | 'removed' | 'modified';
+  content?: string;
+}
+
+interface MessageInfo {
+  id: string;
+  sessionID: string;
+  role: string;
+  createdAt: string;
+}
+
+interface MessageDetail {
+  info: MessageInfo;
+  parts: Array<{ type: string; text?: string }>;
+}
+
 interface ClientConfig {
   baseUrl: string;
   username: string;
@@ -23,7 +65,7 @@ export class OpenCodeClient {
     this.config = config;
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.config.baseUrl.replace(/\/$/, '')}${path}`;
     const headers = new Headers(options.headers);
 
@@ -172,5 +214,178 @@ export class OpenCodeClient {
 
   async getVcs(): Promise<unknown> {
     return this.request('/vcs');
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    return this.request('/agent');
+  }
+
+  async getConfigProviders(): Promise<ConfigProviders> {
+    return this.request('/config/providers');
+  }
+
+  async findText(pattern: string): Promise<SearchResult[]> {
+    return this.request(`/find?pattern=${encodeURIComponent(pattern)}`);
+  }
+
+  async findFile(query: string): Promise<string[]> {
+    return this.request(`/find/file?query=${encodeURIComponent(query)}`);
+  }
+
+  async getSessionDiff(sessionId: string, messageId?: string): Promise<SessionDiff[]> {
+    const query = messageId ? `?messageID=${encodeURIComponent(messageId)}` : '';
+    return this.request(`/session/${sessionId}/diff${query}`);
+  }
+
+  async updateSession(sessionId: string, title: string): Promise<OpenCodeSession> {
+    return this.request(`/session/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  async forkSession(sessionId: string, messageId?: string): Promise<OpenCodeSession> {
+    return this.request(`/session/${sessionId}/fork`, {
+      method: 'POST',
+      body: JSON.stringify(messageId ? { messageID: messageId } : {}),
+    });
+  }
+
+  async abortSession(sessionId: string): Promise<boolean> {
+    return this.request(`/session/${sessionId}/abort`, { method: 'POST' });
+  }
+
+  async shareSession(sessionId: string): Promise<OpenCodeSession> {
+    return this.request(`/session/${sessionId}/share`, { method: 'POST' });
+  }
+
+  async unshareSession(sessionId: string): Promise<OpenCodeSession> {
+    return this.request(`/session/${sessionId}/share`, { method: 'DELETE' });
+  }
+
+  async summarizeSession(sessionId: string, providerId?: string, modelId?: string): Promise<boolean> {
+    return this.request(`/session/${sessionId}/summarize`, {
+      method: 'POST',
+      body: JSON.stringify({ providerID: providerId, modelID: modelId }),
+    });
+  }
+
+  async revertMessage(sessionId: string, messageId: string, partId?: string): Promise<boolean> {
+    return this.request(`/session/${sessionId}/revert`, {
+      method: 'POST',
+      body: JSON.stringify(partId ? { messageID: messageId, partID: partId } : { messageID: messageId }),
+    });
+  }
+
+  async unrevertSession(sessionId: string): Promise<boolean> {
+    return this.request(`/session/${sessionId}/unrevert`, { method: 'POST' });
+  }
+
+  async listMessages(sessionId: string, limit?: number): Promise<MessageDetail[]> {
+    const query = limit ? `?limit=${limit}` : '';
+    return this.request(`/session/${sessionId}/message${query}`);
+  }
+
+  async getMessage(sessionId: string, messageId: string): Promise<MessageDetail> {
+    return this.request(`/session/${sessionId}/message/${messageId}`);
+  }
+
+  async listProjects(): Promise<unknown[]> {
+    return this.request('/project');
+  }
+
+  async getSessionStatus(): Promise<Record<string, unknown>> {
+    return this.request('/session/status');
+  }
+
+  async listCommands(): Promise<unknown[]> {
+    return this.request('/command');
+  }
+
+  async writeLog(service: string, level: string, message: string, extra?: Record<string, unknown>): Promise<boolean> {
+    return this.request('/log', {
+      method: 'POST',
+      body: JSON.stringify({ service, level, message, extra }),
+    });
+  }
+
+  async tuiOpenSessions(): Promise<boolean> {
+    return this.request('/tui/open-sessions', { method: 'POST' });
+  }
+
+  async tuiOpenModels(): Promise<boolean> {
+    return this.request('/tui/open-models', { method: 'POST' });
+  }
+
+  async tuiOpenThemes(): Promise<boolean> {
+    return this.request('/tui/open-themes', { method: 'POST' });
+  }
+
+  async tuiShowToast(message: string, title?: string, variant?: string): Promise<boolean> {
+    return this.request('/tui/show-toast', {
+      method: 'POST',
+      body: JSON.stringify({ message, title, variant }),
+    });
+  }
+
+  async getConfig(): Promise<unknown> {
+    return this.request('/config');
+  }
+
+  async updateConfig(config: Record<string, unknown>): Promise<unknown> {
+    return this.request('/config', {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async listProviders(): Promise<unknown[]> {
+    return this.request('/provider');
+  }
+
+  async getAllSessionStatus(): Promise<Record<string, unknown>> {
+    return this.request('/session/status');
+  }
+
+  async getSessionChildren(sessionId: string): Promise<OpenCodeSession[]> {
+    return this.request(`/session/${sessionId}/children`);
+  }
+
+  async initSession(sessionId: string, providerId?: string, modelId?: string): Promise<boolean> {
+    return this.request(`/session/${sessionId}/init`, {
+      method: 'POST',
+      body: JSON.stringify({ providerID: providerId, modelID: modelId }),
+    });
+  }
+
+  async findSymbol(query: string): Promise<unknown[]> {
+    return this.request(`/find/symbol?query=${encodeURIComponent(query)}`);
+  }
+
+  async getFileStatus(): Promise<unknown[]> {
+    return this.request('/file/status');
+  }
+
+  async listToolIds(): Promise<unknown> {
+    return this.request('/experimental/tool/ids');
+  }
+
+  async disposeInstance(): Promise<boolean> {
+    return this.request('/instance/dispose', { method: 'POST' });
+  }
+
+  async respondToPermission(
+    sessionId: string,
+    permissionId: string,
+    allowed: boolean,
+    remember: boolean = false
+  ): Promise<void> {
+    return this.request(`/session/${sessionId}/permissions/${permissionId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        response: allowed ? 'allow' : 'deny',
+        remember,
+      }),
+    });
   }
 }

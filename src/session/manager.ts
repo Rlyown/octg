@@ -93,6 +93,10 @@ export class SessionManager {
     return Array.from(this.sessions.values()).filter(s => !this.isExpired(s));
   }
 
+  getAll(): TelegramSession[] {
+    return this.list();
+  }
+
   cleanup(): number {
     let count = 0;
     this.sessions.forEach((session, key) => {

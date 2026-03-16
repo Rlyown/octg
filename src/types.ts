@@ -39,6 +39,7 @@ export interface AppConfig {
   codeBlockTimeout: number;
   whitelistFile?: string;
   pairingCodeTtl?: number;
+  enableSSE?: boolean;
 }
 
 /**
@@ -181,8 +182,62 @@ export interface HealthResponse {
 }
 
 /**
- * Config File Schema (for validation)
+ * Agent
  */
+export interface Agent {
+  name: string;
+  description?: string;
+  slug?: string;
+}
+
+/**
+ * Config Providers Response
+ */
+export interface ConfigProviders {
+  providers: Array<{
+    provider: string;
+    models: string[];
+  }>;
+  default: Record<string, string>;
+}
+
+/**
+ * Search Result
+ */
+export interface SearchResult {
+  path: string;
+  lines: Array<{
+    line_number: number;
+    content: string;
+  }>;
+}
+
+/**
+ * Session Diff
+ */
+export interface SessionDiff {
+  path: string;
+  change: 'added' | 'removed' | 'modified';
+  content?: string;
+}
+
+/**
+ * Message Info
+ */
+export interface MessageInfo {
+  id: string;
+  sessionID: string;
+  role: string;
+  createdAt: string;
+}
+
+/**
+ * Message Detail
+ */
+export interface MessageDetail {
+  info: MessageInfo;
+  parts: MessagePart[];
+}
 export const configSchema = {
   telegram: {
     botToken: { type: 'string', required: true },

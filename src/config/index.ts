@@ -40,6 +40,7 @@ function getDefaultConfig(): PluginConfig {
       codeBlockTimeout: 120000,
       whitelistFile: './data/whitelist.json',
       pairingCodeTtl: 2,
+      enableSSE: true,
     },
   };
 }
@@ -102,6 +103,7 @@ function loadEnvConfig(): Partial<PluginConfig> {
   if (process.env.CODE_BLOCK_TIMEOUT) app.codeBlockTimeout = parseInt(process.env.CODE_BLOCK_TIMEOUT, 10);
   if (process.env.WHITELIST_FILE) app.whitelistFile = process.env.WHITELIST_FILE;
   if (process.env.PAIRING_CODE_TTL) app.pairingCodeTtl = parseInt(process.env.PAIRING_CODE_TTL, 10);
+  if (process.env.ENABLE_SSE) app.enableSSE = process.env.ENABLE_SSE === 'true';
 
   // Only add to config if we have any values
   if (Object.keys(telegram).length > 0) config.telegram = telegram as TelegramConfig;

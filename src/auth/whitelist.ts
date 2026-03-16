@@ -36,6 +36,10 @@ export class WhitelistManager {
     this.data = this.load();
   }
 
+  private reload(): void {
+    this.data = this.load();
+  }
+
   private load(): WhitelistData {
     if (existsSync(this.filePath)) {
       try {
@@ -58,6 +62,8 @@ export class WhitelistManager {
 
   // Generate new pairing code
   generatePairingCode(): string {
+    this.reload();
+
     // Clean expired codes first
     this.cleanExpiredCodes();
 
@@ -79,6 +85,7 @@ export class WhitelistManager {
 
   // Verify and use pairing code
   verifyPairingCode(code: string): boolean {
+    this.reload();
     this.cleanExpiredCodes();
 
     const pairingCode = this.data.pairingCodes.find(
@@ -99,6 +106,8 @@ export class WhitelistManager {
 
   // Use pairing code for a user/group
   usePairingCode(code: string, id: string, type: 'user' | 'group', info: { username?: string; title?: string }): boolean {
+    this.reload();
+
     if (!this.verifyPairingCode(code)) {
       return false;
     }
@@ -140,6 +149,8 @@ export class WhitelistManager {
 
   // Check if id is whitelisted
   isWhitelisted(id: string, type: 'user' | 'group'): boolean {
+    this.reload();
+
     if (type === 'user') {
       return this.data.users.some(u => u.id === id);
     }
@@ -148,6 +159,8 @@ export class WhitelistManager {
 
   // Remove from whitelist
   removeFromWhitelist(id: string, type: 'user' | 'group'): boolean {
+    this.reload();
+
     if (type === 'user') {
       const index = this.data.users.findIndex(u => u.id === id);
       if (index >= 0) {
@@ -168,6 +181,7 @@ export class WhitelistManager {
 
   // Get current valid pairing code
   getCurrentPairingCode(): PairingCode | undefined {
+    this.reload();
     this.cleanExpiredCodes();
     return this.data.pairingCodes.find(c => !c.usedBy && new Date() < new Date(c.expiresAt));
   }
@@ -184,11 +198,13 @@ export class WhitelistManager {
 
   // Get whitelist info
   getWhitelist(): WhitelistData {
+    this.reload();
     return this.data;
   }
 
   // Get stats
   getStats(): { users: number; groups: number; activeCodes: number } {
+    this.reload();
     this.cleanExpiredCodes();
     return {
       users: this.data.users.length,

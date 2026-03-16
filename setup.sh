@@ -165,7 +165,7 @@ DATA_PATH=$DATA_PATH
 
 # Session
 SESSION_STORAGE=file
-SESSION_FILE_PATH=/app/data/sessions.json
+SESSION_FILE_PATH=${DATA_PATH}/sessions.json
 SESSION_TTL=86400
 
 # App

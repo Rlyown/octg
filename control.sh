@@ -558,20 +558,21 @@ OPENCODE_PASSWORD=$opencode_password
 
 # Session Configuration
 SESSION_STORAGE=file
-SESSION_FILE_PATH=/app/data/sessions.json
-SESSION_TTL=86400
 EOF
 
-    # Set WHITELIST_FILE based on config location
     if [[ "$setup_target" == "global" ]]; then
+        echo "SESSION_FILE_PATH=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/sessions.json" >> "$target_env_file"
         echo "WHITELIST_FILE=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json" >> "$target_env_file"
         echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
     else
+        echo "SESSION_FILE_PATH=${SCRIPT_DIR}/data/sessions.json" >> "$target_env_file"
         echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
         echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
     fi
     
     cat >> "$target_env_file" << EOF
+SESSION_TTL=86400
+
 
 # Application Configuration
 LOG_LEVEL=info
@@ -939,11 +940,13 @@ cmd_pair() {
 
     load_env
     local whitelist_file="${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}"
+    local pairing_code_ttl="${PAIRING_CODE_TTL:-2}"
     node -e "
         const fs = require('fs');
         const crypto = require('crypto');
 
         const whitelistFile = '$whitelist_file';
+        const pairingCodeTtl = Number('$pairing_code_ttl') || 2;
         let data = { users: [], groups: [], pairingCodes: [] };
 
         if (fs.existsSync(whitelistFile)) {
@@ -954,7 +957,7 @@ cmd_pair() {
 
         const code = crypto.randomBytes(4).toString('hex').toUpperCase();
         const now = new Date();
-        const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
+        const expiresAt = new Date(now.getTime() + pairingCodeTtl * 60 * 1000);
 
         data.pairingCodes.push({
             code,
@@ -970,20 +973,23 @@ cmd_pair() {
         console.log('Share this code with the user or group to authorize.');
         console.log('They should send: /pair ' + code);
         console.log('');
-        console.log('Valid for 2 minutes.');
+        console.log('Valid for ' + pairingCodeTtl + ' minutes.');
     "
 }
 
 # Whitelist command - manage whitelist
 cmd_whitelist() {
     local action="${1:-list}"
+    load_env
+    local whitelist_file="${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}"
     
     case "$action" in
         list|"")
-            if [ -f "${SCRIPT_DIR}/data/whitelist.json" ]; then
+            if [ -f "$whitelist_file" ]; then
                 node -e "
                     const fs = require('fs');
-                    const data = JSON.parse(fs.readFileSync('./data/whitelist.json', 'utf8'));
+                    const file = '$whitelist_file';
+                    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
                     
                     console.log('📋 Whitelisted Users (' + data.users.length + '):');
                     data.users.forEach((u, i) => {
@@ -1019,7 +1025,13 @@ cmd_whitelist() {
             
             node -e "
                 const fs = require('fs');
-                const file = './data/whitelist.json';
+                const file = '$whitelist_file';
+
+                if (!fs.existsSync(file)) {
+                    console.log('✗ Whitelist file not found');
+                    process.exit(1);
+                }
+
                 const data = JSON.parse(fs.readFileSync(file, 'utf8'));
                 
                 if ('$whitelist_type' === 'user') {

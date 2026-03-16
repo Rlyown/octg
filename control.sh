@@ -884,18 +884,13 @@ cmd_logs() {
 
 # Restart command
 cmd_restart() {
-    local mode="${1:-host}"
     cmd_stop
     echo ""
     echo "Restarting..."
     echo ""
     sleep 2
-    
-    if [ "$mode" = "start" ]; then
-        cmd_start
-    else
-        cmd_host
-    fi
+
+    cmd_start
 }
 
 # Update command
@@ -1080,7 +1075,7 @@ cmd_help() {
     echo "  status     Check service status"
     echo "  stop       Stop all services"
     echo "  logs       View logs (background mode only)"
-    echo "  restart    Restart services (foreground by default, use 'restart start' for background)"
+    echo "  restart    Restart services in background mode"
     echo "  update     Update and rebuild"
     echo "  pair       Generate pairing code for authorization"
     echo "  whitelist  Manage whitelist (list|remove)"

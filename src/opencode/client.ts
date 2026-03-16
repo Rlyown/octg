@@ -1,6 +1,7 @@
 import type {
   OpenCodeSession,
   MessageResponse,
+  RequestOverrides,
   Todo,
   FileNode,
   FileContent,
@@ -90,9 +91,18 @@ export class OpenCodeClient {
   }
 
   async sendMessage(sessionId: string, text: string): Promise<MessageResponse> {
+    return this.sendMessageWithOverrides(sessionId, text);
+  }
+
+  async sendMessageWithOverrides(
+    sessionId: string,
+    text: string,
+    overrides: RequestOverrides = {}
+  ): Promise<MessageResponse> {
     return this.request(`/session/${sessionId}/message`, {
       method: 'POST',
       body: JSON.stringify({
+        ...overrides,
         parts: [{ type: 'text', text }],
       }),
     });
@@ -110,21 +120,32 @@ export class OpenCodeClient {
   async executeCommand(
     sessionId: string,
     command: string,
-    args: string[] = []
+    args: string[] = [],
+    overrides: RequestOverrides = {}
   ): Promise<MessageResponse> {
+    const argumentsText = args.join(' ').trim();
+
     return this.request(`/session/${sessionId}/command`, {
       method: 'POST',
       body: JSON.stringify({
+        ...overrides,
         command,
-        arguments: args,
+        arguments: argumentsText,
       }),
     });
   }
 
-  async executeShell(sessionId: string, command: string): Promise<ShellResult> {
+  async executeShell(
+    sessionId: string,
+    command: string,
+    overrides: RequestOverrides = {}
+  ): Promise<ShellResult> {
     return this.request(`/session/${sessionId}/shell`, {
       method: 'POST',
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({
+        ...overrides,
+        command,
+      }),
     });
   }
 

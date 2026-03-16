@@ -90,6 +90,11 @@ export interface MessageResponse {
   parts: MessagePart[];
 }
 
+export interface RequestOverrides {
+  model?: string;
+  agent?: string;
+}
+
 /**
  * Todo Item
  */
@@ -134,9 +139,12 @@ export interface TelegramSession {
   telegramUserId: string;
   telegramChatId: string;
   openCodeSessionId: string;
+  openCodeSessionTitle?: string;
   username?: string;
   firstName?: string;
   lastName?: string;
+  preferredModel?: string;
+  preferredAgent?: string;
   createdAt: Date;
   lastActivity: Date;
 }

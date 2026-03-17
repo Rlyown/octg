@@ -185,7 +185,7 @@ Content-Type: application/json
 
 {
   "messageID": "optional-id",
-  "model": "anthropic/claude-sonnet-4-5",  // 可选
+  "model": { "providerID": "anthropic", "modelID": "claude-sonnet-4-5" },  // 可选
   "agent": "agent-id",  // 可选
   "noReply": false,  // 是否不需要回复
   "system": "optional-system-prompt",
@@ -242,7 +242,7 @@ Content-Type: application/json
 {
   "messageID": "optional",
   "agent": "agent-id",
-  "model": "model-id",
+  "model": { "providerID": "provider-id", "modelID": "model-id" },
   "command": "/command-name",
   "arguments": ["arg1", "arg2"]
 }
@@ -255,7 +255,7 @@ Content-Type: application/json
 
 {
   "agent": "agent-id",
-  "model": "model-id",  // 可选
+  "model": { "providerID": "provider-id", "modelID": "model-id" },  // 可选
   "command": "ls -la"
 }
 ```

@@ -88,8 +88,7 @@ Use `atk plugins telegram setup` to write config, then `atk plugins telegram sta
 | `/sessions <index>` | Attach to a session by list index | `/sessions 3` |
 | `/sessions <id-prefix>` | Attach to a session by id prefix | `/sessions abc123` |
 | `/new [title]` | Create a new session | `/new bugfix flow` |
-| `/cd` | Show current directory | `/cd` |
-| `/cd [path]` | Directory switching is unavailable on current `serve` | `/cd src` |
+| `/cwd` | Show current directory | `/cwd` |
 | `/model` | Show current model override | `/model` |
 | `/model list [provider]` | List models locally via CLI | `/model list github-copilot` |
 | `/model <provider/model>` | Set the model override for future messages | `/model packy-gpt/gpt-5.4` |
@@ -99,7 +98,6 @@ Use `atk plugins telegram setup` to write config, then `atk plugins telegram sta
 | `/ls [path]` | List files | `/ls src` |
 | `/cat <file>` | Read file | `/cat README.md` |
 | `/code <desc>` | Generate code | `/code React button` |
-| `/run <cmd>` | Slash-command forwarding is unavailable on current `serve` | `/run git status` |
 | `/shell <cmd>` | Run shell command | `/shell ls -la` |
 | `/todos` | List todos | `/todos` |
 

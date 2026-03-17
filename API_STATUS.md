@@ -64,14 +64,6 @@
 - ✅ `/tools` - 列出可用工具
 - ✅ `/log <消息>` - 写入日志到 OpenCode
 
-### TUI 控制
-- ✅ `/tui-toast <消息>` - 在 TUI 显示通知
-- ✅ `/tui-sessions` - 在 TUI 打开会话选择器
-- ✅ `/tui-models` - 在 TUI 打开模型选择器
-- ✅ `/tui-themes` - 在 TUI 打开主题选择器
-
----
-
 ## ✅ 已实现后台组件 (2 个)
 
 ### 1. SSE 事件流监听

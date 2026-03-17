@@ -22,7 +22,7 @@
   - `/help`
   - `/model`
   - `/agents`
-  - `/cd`
+  - `/cwd`
   - generic forwarded slash commands
 - If `serve /command` becomes stable, consider restoring Telegram forwarding for selected commands.
 - If `serve /command` remains unstable, evaluate whether ACP exposes a safer command-execution path.

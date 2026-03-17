@@ -54,13 +54,15 @@ export function formatStatus(params: {
   sessionId: string;
   sessionTitle?: string;
   overrides?: RequestOverrides;
+  modelLabel?: string;
+  agentLabel?: string;
 }): string {
   const projectLabel = stringifySummary(params.project);
   const pathLabel = stringifySummary(params.path);
-  const modelLabel = params.overrides?.model 
+  const modelLabel = params.modelLabel || (params.overrides?.model 
     ? `${params.overrides.model.providerID}/${params.overrides.model.modelID}`
-    : 'default';
-  const agentLabel = params.overrides?.agent || 'default';
+    : 'openai/gpt-5.4');
+  const agentLabel = params.agentLabel || params.overrides?.agent || 'OpenCode default';
 
   return [
     '📊 OpenCode 状态',

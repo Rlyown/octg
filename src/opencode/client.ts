@@ -230,25 +230,6 @@ export class OpenCodeClient {
     });
   }
 
-  async tuiOpenSessions(): Promise<boolean> {
-    return this.request('/tui/open-sessions', { method: 'POST' });
-  }
-
-  async tuiOpenModels(): Promise<boolean> {
-    return this.request('/tui/open-models', { method: 'POST' });
-  }
-
-  async tuiOpenThemes(): Promise<boolean> {
-    return this.request('/tui/open-themes', { method: 'POST' });
-  }
-
-  async tuiShowToast(message: string, title?: string, variant?: string): Promise<boolean> {
-    return this.request('/tui/show-toast', {
-      method: 'POST',
-      body: JSON.stringify({ message, title, variant }),
-    });
-  }
-
   async getConfig(): Promise<unknown> {
     return this.request('/config');
   }

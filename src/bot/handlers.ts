@@ -16,6 +16,7 @@ import {
 } from './formatters.js';
 
 export class BotHandlers {
+  private static readonly FALLBACK_MODEL = 'openai/gpt-5.4';
   private static readonly LOCAL_COMMANDS = new Set([
     'pair', 'start', 'help', 'status', 'new', 'sessions', 'cwd',
     'model', 'agents', 'ls', 'cat', 'code', 'shell', 'todos',
@@ -23,7 +24,6 @@ export class BotHandlers {
     'share', 'unshare', 'diff', 'summarize', 'projects', 'commands',
     'config', 'providers', 'status-all', 'children',
     'init', 'symbol', 'git-status', 'tools',
-    'tuitoast', 'tuisessions', 'tuimodels', 'tuithemes',
   ]);
 
   private bot: Telegraf;
@@ -153,10 +153,6 @@ export class BotHandlers {
     this.bot.command('symbol', this.withWhitelist(this.handleSymbol.bind(this)));
     this.bot.command('git-status', this.withWhitelist(this.handleGitStatus.bind(this)));
     this.bot.command('tools', this.withWhitelist(this.handleTools.bind(this)));
-    this.bot.command('tuitoast', this.withWhitelist(this.handleToast.bind(this)));
-    this.bot.command('tuisessions', this.withWhitelist(this.handleOpenSessions.bind(this)));
-    this.bot.command('tuimodels', this.withWhitelist(this.handleOpenModels.bind(this)));
-    this.bot.command('tuithemes', this.withWhitelist(this.handleOpenThemes.bind(this)));
 
     this.bot.action(/^perm:(allow|allow-remember|deny):(.+)$/, this.handlePermissionAction.bind(this));
 
@@ -308,7 +304,6 @@ export class BotHandlers {
 /diff - 查看变更
 /history [数量] - 查看历史
 /todos - 查看任务
-/tuitoast <消息> - 发送到 TUI
 /help - 显示完整帮助
 
 也可以直接发送消息与我对话！`
@@ -368,12 +363,6 @@ AI 设置：
 工具：
 /tools - 列出可用工具
 
-TUI 控制：
-/tuitoast <消息> - 发送通知到 TUI
-/tuisessions - 打开会话选择器
-/tuimodels - 打开模型选择器
-/tuithemes - 打开主题选择器
-
 提示：直接发送消息可以与 AI 对话`,
       { parse_mode: 'Markdown' }
     );
@@ -389,6 +378,7 @@ TUI 控制：
       const path = await this.opencode.getPath();
       const todos = await this.opencode.getTodos(session.openCodeSessionId);
       const liveSession = await this.opencode.getSession(session.openCodeSessionId).catch(() => null);
+      const resolvedModel = await this.getResolvedModelInfo(session);
 
       if (liveSession?.title && liveSession.title !== session.openCodeSessionTitle) {
         session.openCodeSessionTitle = liveSession.title;
@@ -403,7 +393,9 @@ TUI 控制：
           todosCount: todos.length,
           sessionId: session.openCodeSessionId,
           sessionTitle: liveSession?.title || session.openCodeSessionTitle,
-          overrides: this.getOverrides(session),
+          overrides: await this.getOverrides(session),
+          modelLabel: resolvedModel.label,
+          agentLabel: session.preferredAgent || 'OpenCode default',
         })
       );
     } catch (error) {
@@ -519,7 +511,7 @@ TUI 控制：
       const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
         prompt,
-        this.getOverrides(session)
+        await this.getOverrides(session)
       );
       const text = response.parts.map(p => p.text).join('\n');
 
@@ -551,7 +543,7 @@ TUI 控制：
       const response = await this.opencode.executeShell(
         session.openCodeSessionId,
         command,
-        this.getOverrides(session)
+        await this.getOverrides(session)
       );
 
       await ctx.deleteMessage(processingMsg.message_id);
@@ -609,7 +601,7 @@ TUI 控制：
       const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
         message.text,
-        this.getOverrides(session)
+        await this.getOverrides(session)
       );
 
       await ctx.deleteMessage(processingMsg.message_id);
@@ -716,9 +708,12 @@ TUI 控制：
     const normalized = args.join(' ').trim();
 
     if (!normalized) {
+      const resolvedModel = await this.getResolvedModelInfo(session);
+
       await ctx.reply(
         `🧠 当前模型\n\n` +
-        `${session.preferredModel || 'default'}\n\n` +
+        `${resolvedModel.label}\n` +
+        `来源：${resolvedModel.source}\n\n` +
         `用法：\n` +
         `/model <provider/model> 设置模型\n` +
         `/model clear 清除模型覆盖\n` +
@@ -745,7 +740,7 @@ TUI 控制：
     if (normalized === 'clear') {
       delete session.preferredModel;
       this.sessions.set(session);
-      await ctx.reply('✅ 已清除模型覆盖，后续消息将使用默认模型');
+      await ctx.reply(`✅ 已清除模型覆盖\n\n后续消息将优先使用 OpenCode 默认模型；如果服务端默认无法解析，则回退到 ${BotHandlers.FALLBACK_MODEL}`);
       return;
     }
 
@@ -810,24 +805,99 @@ TUI 控制：
     }
   }
 
-  private getOverrides(session: TelegramSession): RequestOverrides {
+  private async getOverrides(session: TelegramSession): Promise<RequestOverrides> {
     const overrides: RequestOverrides = {};
-    
-    if (session.preferredModel) {
-      const parts = session.preferredModel.split('/');
-      if (parts.length >= 2) {
-        overrides.model = {
-          providerID: parts[0],
-          modelID: parts.slice(1).join('/'),
-        };
-      }
+
+    const resolvedModel = await this.getResolvedModelInfo(session);
+    const modelOverride = this.parseModelOverride(resolvedModel.label);
+    if (modelOverride) {
+      overrides.model = modelOverride;
     }
-    
+
     if (session.preferredAgent) {
       overrides.agent = session.preferredAgent;
     }
-    
+
     return overrides;
+  }
+
+  private parseModelOverride(modelLabel?: string): RequestOverrides['model'] | undefined {
+    if (!modelLabel) {
+      return undefined;
+    }
+
+    const parts = modelLabel.split('/');
+    if (parts.length < 2) {
+      return undefined;
+    }
+
+    return {
+      providerID: parts[0],
+      modelID: parts.slice(1).join('/'),
+    };
+  }
+
+  private async getResolvedModelInfo(session: TelegramSession): Promise<{ label: string; source: string }> {
+    if (session.preferredModel) {
+      return {
+        label: session.preferredModel,
+        source: '本地覆盖',
+      };
+    }
+
+    const providers = await this.opencode.getConfigProviders().catch(() => null);
+    const configuredDefault = this.getConfiguredDefaultModelLabel(providers);
+
+    if (configuredDefault) {
+      return {
+        label: configuredDefault,
+        source: 'OpenCode 默认',
+      };
+    }
+
+    return {
+      label: BotHandlers.FALLBACK_MODEL,
+      source: '回退默认',
+    };
+  }
+
+  private getConfiguredDefaultModelLabel(config: { default?: unknown } | null): string | undefined {
+    if (!config?.default || typeof config.default !== 'object') {
+      return undefined;
+    }
+
+    const defaults = config.default as Record<string, unknown>;
+    const knownPairs: Array<[string, string]> = [
+      ['providerID', 'modelID'],
+      ['providerId', 'modelId'],
+      ['provider', 'model'],
+    ];
+
+    for (const [providerKey, modelKey] of knownPairs) {
+      const provider = defaults[providerKey];
+      const model = defaults[modelKey];
+      if (typeof provider === 'string' && typeof model === 'string' && provider && model) {
+        return `${provider}/${model}`;
+      }
+    }
+
+    const nestedModel = defaults.model;
+    if (nestedModel && typeof nestedModel === 'object') {
+      const parsedNestedModel = this.getConfiguredDefaultModelLabel({ default: nestedModel });
+      if (parsedNestedModel) {
+        return parsedNestedModel;
+      }
+    }
+
+    const entries = Object.entries(defaults).filter(([, value]) => typeof value === 'string' && value.length > 0);
+    if (entries.length === 1) {
+      const [provider, model] = entries[0];
+      if (typeof model === 'string') {
+        return `${provider}/${model}`;
+      }
+    }
+
+    return undefined;
   }
 
   private async createSessionFromMessage(
@@ -1347,66 +1417,6 @@ TUI 控制：
       await ctx.reply(`⚡ OpenCode 内置命令 (${commands.length})${more}\n\n${lines.join('\n')}`);
     } catch (error) {
       await ctx.reply(`❌ 获取命令列表失败: ${error}`);
-    }
-  }
-
-  private async handleToast(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    const message = ctx.message as Message.TextMessage;
-    const text = message.text.replace('/tuitoast', '').trim();
-
-    if (!text) {
-      await ctx.reply('请提供消息内容，例如: /tuitoast 你好，TUI！');
-      return;
-    }
-
-    try {
-      const success = await this.opencode.tuiShowToast(text, 'Telegram Bot', 'info');
-      if (success) {
-        await ctx.reply('✅ 通知已发送到 TUI');
-      } else {
-        await ctx.reply('⚠️ 发送失败');
-      }
-    } catch (error) {
-      await ctx.reply(`❌ 发送通知失败: ${error}`);
-    }
-  }
-
-  private async handleOpenSessions(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    try {
-      const success = await this.opencode.tuiOpenSessions();
-      if (success) {
-        await ctx.reply('✅ 已在 TUI 打开会话选择器');
-      } else {
-        await ctx.reply('⚠️ 打开失败');
-      }
-    } catch (error) {
-      await ctx.reply(`❌ 打开失败: ${error}`);
-    }
-  }
-
-  private async handleOpenModels(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    try {
-      const success = await this.opencode.tuiOpenModels();
-      if (success) {
-        await ctx.reply('✅ 已在 TUI 打开模型选择器');
-      } else {
-        await ctx.reply('⚠️ 打开失败');
-      }
-    } catch (error) {
-      await ctx.reply(`❌ 打开失败: ${error}`);
-    }
-  }
-
-  private async handleOpenThemes(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    try {
-      const success = await this.opencode.tuiOpenThemes();
-      if (success) {
-        await ctx.reply('✅ 已在 TUI 打开主题选择器');
-      } else {
-        await ctx.reply('⚠️ 打开失败');
-      }
-    } catch (error) {
-      await ctx.reply(`❌ 打开失败: ${error}`);
     }
   }
 

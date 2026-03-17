@@ -3,7 +3,7 @@ import type { InlineKeyboardMarkup, Message, Update } from 'telegraf/types';
 import { resolve } from 'path';
 import type { OpenCodeClient } from '../opencode/client.js';
 import type { SessionManager } from '../session/manager.js';
-import type { PluginConfig, TelegramSession } from '../types.js';
+import type { PluginConfig, RequestOverrides, TelegramSession } from '../types.js';
 import { WhitelistManager } from '../auth/whitelist.js';
 import { SSEClient } from '../opencode/sse-client.js';
 import { PermissionHandler } from '../opencode/permission-handler.js';
@@ -23,7 +23,7 @@ export class BotHandlers {
     'share', 'unshare', 'diff', 'summarize', 'projects', 'commands',
     'config', 'providers', 'status-all', 'children',
     'init', 'symbol', 'git-status', 'tools',
-    'tui-toast', 'tui-sessions', 'tui-models', 'tui-themes',
+    'tuitoast', 'tuisessions', 'tuimodels', 'tuithemes',
   ]);
 
   private bot: Telegraf;
@@ -153,10 +153,10 @@ export class BotHandlers {
     this.bot.command('symbol', this.withWhitelist(this.handleSymbol.bind(this)));
     this.bot.command('git-status', this.withWhitelist(this.handleGitStatus.bind(this)));
     this.bot.command('tools', this.withWhitelist(this.handleTools.bind(this)));
-    this.bot.command('tui-toast', this.withWhitelist(this.handleToast.bind(this)));
-    this.bot.command('tui-sessions', this.withWhitelist(this.handleOpenSessions.bind(this)));
-    this.bot.command('tui-models', this.withWhitelist(this.handleOpenModels.bind(this)));
-    this.bot.command('tui-themes', this.withWhitelist(this.handleOpenThemes.bind(this)));
+    this.bot.command('tuitoast', this.withWhitelist(this.handleToast.bind(this)));
+    this.bot.command('tuisessions', this.withWhitelist(this.handleOpenSessions.bind(this)));
+    this.bot.command('tuimodels', this.withWhitelist(this.handleOpenModels.bind(this)));
+    this.bot.command('tuithemes', this.withWhitelist(this.handleOpenThemes.bind(this)));
 
     this.bot.action(/^perm:(allow|allow-remember|deny):(.+)$/, this.handlePermissionAction.bind(this));
 
@@ -308,7 +308,7 @@ export class BotHandlers {
 /diff - 查看变更
 /history [数量] - 查看历史
 /todos - 查看任务
-/tui-toast <消息> - 发送到 TUI
+/tuitoast <消息> - 发送到 TUI
 /help - 显示完整帮助
 
 也可以直接发送消息与我对话！`
@@ -369,10 +369,10 @@ AI 设置：
 /tools - 列出可用工具
 
 TUI 控制：
-/tui-toast <消息> - 发送通知到 TUI
-/tui-sessions - 打开会话选择器
-/tui-models - 打开模型选择器
-/tui-themes - 打开主题选择器
+/tuitoast <消息> - 发送通知到 TUI
+/tuisessions - 打开会话选择器
+/tuimodels - 打开模型选择器
+/tuithemes - 打开主题选择器
 
 提示：直接发送消息可以与 AI 对话`,
       { parse_mode: 'Markdown' }
@@ -810,11 +810,24 @@ TUI 控制：
     }
   }
 
-  private getOverrides(session: TelegramSession) {
-    return {
-      model: session.preferredModel,
-      agent: session.preferredAgent,
-    };
+  private getOverrides(session: TelegramSession): RequestOverrides {
+    const overrides: RequestOverrides = {};
+    
+    if (session.preferredModel) {
+      const parts = session.preferredModel.split('/');
+      if (parts.length >= 2) {
+        overrides.model = {
+          providerID: parts[0],
+          modelID: parts.slice(1).join('/'),
+        };
+      }
+    }
+    
+    if (session.preferredAgent) {
+      overrides.agent = session.preferredAgent;
+    }
+    
+    return overrides;
   }
 
   private async createSessionFromMessage(
@@ -1339,10 +1352,10 @@ TUI 控制：
 
   private async handleToast(ctx: Context<Update.MessageUpdate>): Promise<void> {
     const message = ctx.message as Message.TextMessage;
-    const text = message.text.replace('/tui-toast', '').trim();
+    const text = message.text.replace('/tuitoast', '').trim();
 
     if (!text) {
-      await ctx.reply('请提供消息内容，例如: /tui-toast 你好，TUI！');
+      await ctx.reply('请提供消息内容，例如: /tuitoast 你好，TUI！');
       return;
     }
 

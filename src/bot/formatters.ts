@@ -57,7 +57,9 @@ export function formatStatus(params: {
 }): string {
   const projectLabel = stringifySummary(params.project);
   const pathLabel = stringifySummary(params.path);
-  const modelLabel = params.overrides?.model || 'default';
+  const modelLabel = params.overrides?.model 
+    ? `${params.overrides.model.providerID}/${params.overrides.model.modelID}`
+    : 'default';
   const agentLabel = params.overrides?.agent || 'default';
 
   return [

@@ -92,7 +92,10 @@ export interface MessageResponse {
 }
 
 export interface RequestOverrides {
-  model?: string;
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
   agent?: string;
 }
 

@@ -36,10 +36,10 @@ const BOT_COMMANDS = [
   { command: 'symbol', description: '查找符号 /symbol <查询>' },
   { command: 'git-status', description: '查看 Git 文件状态' },
   { command: 'tools', description: '列出可用工具' },
-  { command: 'tui-toast', description: '在 TUI 显示通知 /tui-toast <消息>' },
-  { command: 'tui-sessions', description: '在 TUI 打开会话选择器' },
-  { command: 'tui-models', description: '在 TUI 打开模型选择器' },
-  { command: 'tui-themes', description: '在 TUI 打开主题选择器' },
+  { command: 'tuitoast', description: '在 TUI 显示通知 /tuitoast <消息>' },
+  { command: 'tuisessions', description: '在 TUI 打开会话选择器' },
+  { command: 'tuimodels', description: '在 TUI 打开模型选择器' },
+  { command: 'tuithemes', description: '在 TUI 打开主题选择器' },
 ];
 
 export function createBot(config: PluginConfig['telegram']): Telegraf {

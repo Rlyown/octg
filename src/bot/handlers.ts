@@ -269,40 +269,16 @@ export class BotHandlers {
 
     let session = this.sessions.get(userId);
 
-    if (!session) {
-      try {
-        const openCodeSession = await this.opencode.createSession(
-          `Telegram User ${userId}`
-        );
-
-        session = {
-          telegramUserId: userId,
-          telegramChatId: chatId,
-          openCodeSessionId: openCodeSession.id,
-          openCodeSessionTitle: openCodeSession.title,
-          username: ctx.from?.username,
-          firstName: ctx.from?.first_name,
-          lastName: ctx.from?.last_name,
-          createdAt: new Date(),
-          lastActivity: new Date(),
-        };
-
-        this.sessions.set(session);
-      } catch (error) {
-        await ctx.reply(`创建会话失败: ${error}`);
-        return null;
-      }
-    } else {
+    if (session) {
       this.sessions.updateActivity(userId);
+      return session;
     }
 
-    return session;
+    await ctx.reply('还没有会话。发送任意消息创建新会话，或使用 /new [标题] 手动创建。');
+    return null;
   }
 
   private async handleStart(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    const session = await this.ensureSession(ctx);
-    if (!session) return;
-
     await ctx.reply(
       `👋 你好 ${ctx.from?.first_name || '用户'}!
 
@@ -313,6 +289,8 @@ export class BotHandlers {
 ⚡ 执行命令
 ✅ 管理任务
 🎮 控制 TUI
+
+发送任意消息创建新会话，或使用 /new [标题] 手动创建。
 
 可用命令：
 /sessions - 查看/切换会话
@@ -602,8 +580,8 @@ TUI 控制：
   }
 
   private async handleMessage(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    const session = await this.ensureSession(ctx);
-    if (!session) return;
+    const userId = ctx.from?.id.toString();
+    if (!userId) return;
 
     const message = ctx.message as Message.TextMessage;
 
@@ -615,6 +593,14 @@ TUI 控制：
         await ctx.reply(this.getServeCommandUnavailableMessage(`/${command}`));
       }
       return;
+    }
+
+    let session = this.sessions.get(userId);
+    if (!session) {
+      session = await this.createSessionFromMessage(ctx, message.text);
+      if (!session) return;
+    } else {
+      this.sessions.updateActivity(userId);
     }
 
     const processingMsg = await ctx.reply('🤔 思考中...');
@@ -630,7 +616,6 @@ TUI 控制：
 
       const text = response.parts.map(p => p.text).join('\n');
 
-      // Split long messages
       const maxLength = this.config.app.maxMessageLength;
       if (text.length > maxLength) {
         for (let i = 0; i < text.length; i += maxLength) {
@@ -830,6 +815,43 @@ TUI 控制：
       model: session.preferredModel,
       agent: session.preferredAgent,
     };
+  }
+
+  private async createSessionFromMessage(
+    ctx: Context<Update.MessageUpdate>,
+    messageText: string
+  ): Promise<TelegramSession | undefined> {
+    const userId = ctx.from?.id.toString();
+    const chatId = ctx.chat?.id.toString();
+
+    if (!userId || !chatId) {
+      await ctx.reply('无法获取用户信息');
+      return;
+    }
+
+    const title = messageText.slice(0, 50).replace(/\n/g, ' ');
+
+    try {
+      const openCodeSession = await this.opencode.createSession(title);
+
+      const session: TelegramSession = {
+        telegramUserId: userId,
+        telegramChatId: chatId,
+        openCodeSessionId: openCodeSession.id,
+        openCodeSessionTitle: openCodeSession.title,
+        username: ctx.from?.username,
+        firstName: ctx.from?.first_name,
+        lastName: ctx.from?.last_name,
+        createdAt: new Date(),
+        lastActivity: new Date(),
+      };
+
+      this.sessions.set(session);
+      return session;
+    } catch (error) {
+      await ctx.reply(`创建会话失败: ${error}`);
+      return undefined;
+    }
   }
 
   private async handleSessionsPage(ctx: Context<Update.CallbackQueryUpdate>): Promise<void> {

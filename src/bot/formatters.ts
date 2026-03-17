@@ -130,23 +130,6 @@ export function formatSessionOverview(params: {
   ].join('\n');
 }
 
-export function formatForwardedOutput(command: string, text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return `✅ /${command} 执行完成`;
-  }
-
-  const normalized = trimmed.replace(/\r\n/g, '\n');
-  const lines = normalized.split('\n');
-  const looksTabular = lines.some(line => /\s{2,}/.test(line)) || /[│─┌┐└┘]/.test(normalized);
-
-  if (looksTabular) {
-    return `/${command}\n\n${normalized}`;
-  }
-
-  return normalized;
-}
-
 function stringifySummary(value: unknown): string {
   if (typeof value === 'string') return value;
 

@@ -1,12 +1,6 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
-import type {
-  PluginConfig,
-  TelegramConfig,
-  OpencodeConfig,
-  SessionConfig,
-  AppConfig,
-} from '../types.js';
+import type { PluginConfig } from '../types.js';
 
 export function loadConfig(): PluginConfig {
   const defaults = getDefaultConfig();
@@ -69,49 +63,56 @@ function loadConfigFile(): Partial<PluginConfig> {
 
 function loadEnvConfig(): Partial<PluginConfig> {
   const config: Partial<PluginConfig> = {};
-  const telegram: Partial<TelegramConfig> = {};
-  const opencode: Partial<OpencodeConfig> = {};
-  const session: Partial<SessionConfig> = {};
-  const app: Partial<AppConfig> = {};
 
-  // Telegram
-  if (process.env.TELEGRAM_BOT_TOKEN) telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
-  if (process.env.TELEGRAM_MODE) telegram.mode = process.env.TELEGRAM_MODE as 'webhook' | 'polling';
-  if (process.env.TELEGRAM_WEBHOOK_URL) telegram.webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
-  if (process.env.TELEGRAM_WEBHOOK_PORT) telegram.webhookPort = parseInt(process.env.TELEGRAM_WEBHOOK_PORT, 10);
-  if (process.env.TELEGRAM_ALLOWED_USER_IDS) {
-    telegram.allowedUserIds = process.env.TELEGRAM_ALLOWED_USER_IDS
-      .split(',')
-      .map(id => id.trim())
-      .filter(Boolean);
+  const envMappings: Array<{ env: string; path: string; parser?: (v: string) => unknown }> = [
+    // Telegram
+    { env: 'TELEGRAM_BOT_TOKEN', path: 'telegram.botToken' },
+    { env: 'TELEGRAM_MODE', path: 'telegram.mode' },
+    { env: 'TELEGRAM_WEBHOOK_URL', path: 'telegram.webhookUrl' },
+    { env: 'TELEGRAM_WEBHOOK_PORT', path: 'telegram.webhookPort', parser: (v) => parseInt(v, 10) },
+    { env: 'TELEGRAM_ALLOWED_USER_IDS', path: 'telegram.allowedUserIds', parser: (v) => v.split(',').map(id => id.trim()).filter(Boolean) },
+    // OpenCode
+    { env: 'OPENCODE_SERVER_URL', path: 'opencode.serverUrl' },
+    { env: 'OPENCODE_USERNAME', path: 'opencode.username' },
+    { env: 'OPENCODE_PASSWORD', path: 'opencode.password' },
+    { env: 'OPENCODE_REQUEST_TIMEOUT', path: 'opencode.requestTimeout', parser: (v) => parseInt(v, 10) },
+    // Session
+    { env: 'SESSION_STORAGE', path: 'session.storage' },
+    { env: 'SESSION_FILE_PATH', path: 'session.filePath' },
+    { env: 'SESSION_TTL', path: 'session.ttl', parser: (v) => parseInt(v, 10) },
+    // App
+    { env: 'LOG_LEVEL', path: 'app.logLevel' },
+    { env: 'MAX_MESSAGE_LENGTH', path: 'app.maxMessageLength', parser: (v) => parseInt(v, 10) },
+    { env: 'CODE_BLOCK_TIMEOUT', path: 'app.codeBlockTimeout', parser: (v) => parseInt(v, 10) },
+    { env: 'WHITELIST_FILE', path: 'app.whitelistFile' },
+    { env: 'PAIRING_CODE_TTL', path: 'app.pairingCodeTtl', parser: (v) => parseInt(v, 10) },
+    { env: 'ENABLE_SSE', path: 'app.enableSSE', parser: (v) => v === 'true' },
+  ];
+
+  for (const { env, path, parser } of envMappings) {
+    const value = process.env[env];
+    if (value) {
+      const parsedValue = parser ? parser(value) : value;
+      setDeepValue(config, path, parsedValue);
+    }
   }
 
-  // OpenCode
-  if (process.env.OPENCODE_SERVER_URL) opencode.serverUrl = process.env.OPENCODE_SERVER_URL;
-  if (process.env.OPENCODE_USERNAME) opencode.username = process.env.OPENCODE_USERNAME;
-  if (process.env.OPENCODE_PASSWORD) opencode.password = process.env.OPENCODE_PASSWORD;
-  if (process.env.OPENCODE_REQUEST_TIMEOUT) opencode.requestTimeout = parseInt(process.env.OPENCODE_REQUEST_TIMEOUT, 10);
-
-  // Session
-  if (process.env.SESSION_STORAGE) session.storage = process.env.SESSION_STORAGE as 'memory' | 'file';
-  if (process.env.SESSION_FILE_PATH) session.filePath = process.env.SESSION_FILE_PATH;
-  if (process.env.SESSION_TTL) session.ttl = parseInt(process.env.SESSION_TTL, 10);
-
-  // App
-  if (process.env.LOG_LEVEL) app.logLevel = process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error';
-  if (process.env.MAX_MESSAGE_LENGTH) app.maxMessageLength = parseInt(process.env.MAX_MESSAGE_LENGTH, 10);
-  if (process.env.CODE_BLOCK_TIMEOUT) app.codeBlockTimeout = parseInt(process.env.CODE_BLOCK_TIMEOUT, 10);
-  if (process.env.WHITELIST_FILE) app.whitelistFile = process.env.WHITELIST_FILE;
-  if (process.env.PAIRING_CODE_TTL) app.pairingCodeTtl = parseInt(process.env.PAIRING_CODE_TTL, 10);
-  if (process.env.ENABLE_SSE) app.enableSSE = process.env.ENABLE_SSE === 'true';
-
-  // Only add to config if we have any values
-  if (Object.keys(telegram).length > 0) config.telegram = telegram as TelegramConfig;
-  if (Object.keys(opencode).length > 0) config.opencode = opencode as OpencodeConfig;
-  if (Object.keys(session).length > 0) config.session = session as SessionConfig;
-  if (Object.keys(app).length > 0) config.app = app as AppConfig;
-
   return config;
+}
+
+function setDeepValue(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const keys = path.split('.');
+  let current: Record<string, unknown> = obj;
+  
+  for (let i = 0; i < keys.length - 1; i++) {
+    const key = keys[i];
+    if (!current[key]) {
+      current[key] = {};
+    }
+    current = current[key] as Record<string, unknown>;
+  }
+  
+  current[keys[keys.length - 1]] = value;
 }
 
 function mergeConfig(

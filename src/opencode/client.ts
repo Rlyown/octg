@@ -7,49 +7,12 @@ import type {
   FileContent,
   ShellResult,
   HealthResponse,
+  Agent,
+  ConfigProviders,
+  SearchResult,
+  SessionDiff,
+  MessageDetail,
 } from '../types.js';
-
-interface Agent {
-  name: string;
-  description?: string;
-  slug?: string;
-}
-
-interface ModelInfo {
-  provider: string;
-  models: string[];
-}
-
-interface ConfigProviders {
-  providers: ModelInfo[];
-  default: Record<string, string>;
-}
-
-interface SearchResult {
-  path: string;
-  lines: Array<{
-    line_number: number;
-    content: string;
-  }>;
-}
-
-interface SessionDiff {
-  path: string;
-  change: 'added' | 'removed' | 'modified';
-  content?: string;
-}
-
-interface MessageInfo {
-  id: string;
-  sessionID: string;
-  role: string;
-  createdAt: string;
-}
-
-interface MessageDetail {
-  info: MessageInfo;
-  parts: Array<{ type: string; text?: string }>;
-}
 
 interface ClientConfig {
   baseUrl: string;
@@ -150,33 +113,6 @@ export class OpenCodeClient {
     });
   }
 
-  async sendMessageAsync(sessionId: string, text: string): Promise<void> {
-    await this.request(`/session/${sessionId}/prompt_async`, {
-      method: 'POST',
-      body: JSON.stringify({
-        parts: [{ type: 'text', text }],
-      }),
-    });
-  }
-
-  async executeCommand(
-    sessionId: string,
-    command: string,
-    args: string[] = [],
-    overrides: RequestOverrides = {}
-  ): Promise<MessageResponse> {
-    const argumentsText = args.join(' ').trim();
-
-    return this.request(`/session/${sessionId}/command`, {
-      method: 'POST',
-      body: JSON.stringify({
-        ...overrides,
-        command,
-        arguments: argumentsText,
-      }),
-    });
-  }
-
   async executeShell(
     sessionId: string,
     command: string,
@@ -210,10 +146,6 @@ export class OpenCodeClient {
 
   async getPath(): Promise<unknown> {
     return this.request('/path');
-  }
-
-  async getVcs(): Promise<unknown> {
-    return this.request('/vcs');
   }
 
   async listAgents(): Promise<Agent[]> {
@@ -270,17 +202,6 @@ export class OpenCodeClient {
     });
   }
 
-  async revertMessage(sessionId: string, messageId: string, partId?: string): Promise<boolean> {
-    return this.request(`/session/${sessionId}/revert`, {
-      method: 'POST',
-      body: JSON.stringify(partId ? { messageID: messageId, partID: partId } : { messageID: messageId }),
-    });
-  }
-
-  async unrevertSession(sessionId: string): Promise<boolean> {
-    return this.request(`/session/${sessionId}/unrevert`, { method: 'POST' });
-  }
-
   async listMessages(sessionId: string, limit?: number): Promise<MessageDetail[]> {
     const query = limit ? `?limit=${limit}` : '';
     return this.request(`/session/${sessionId}/message${query}`);
@@ -332,13 +253,6 @@ export class OpenCodeClient {
     return this.request('/config');
   }
 
-  async updateConfig(config: Record<string, unknown>): Promise<unknown> {
-    return this.request('/config', {
-      method: 'PATCH',
-      body: JSON.stringify(config),
-    });
-  }
-
   async listProviders(): Promise<unknown[]> {
     return this.request('/provider');
   }
@@ -368,10 +282,6 @@ export class OpenCodeClient {
 
   async listToolIds(): Promise<unknown> {
     return this.request('/experimental/tool/ids');
-  }
-
-  async disposeInstance(): Promise<boolean> {
-    return this.request('/instance/dispose', { method: 'POST' });
   }
 
   async respondToPermission(

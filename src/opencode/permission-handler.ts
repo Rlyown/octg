@@ -42,6 +42,10 @@ export class PermissionHandler {
     setInterval(() => this.cleanupExpiredPermissions(), 30000);
   }
 
+  private shortId(value: string): string {
+    return value.slice(0, 8);
+  }
+
   async handlePermissionRequest(event: {
     sessionID: string;
     permissionID: string;
@@ -49,9 +53,13 @@ export class PermissionHandler {
     tool?: string;
     action?: string;
   }): Promise<void> {
+    console.log(
+      `[octg][permission] requested session=${this.shortId(event.sessionID)} permission=${this.shortId(event.permissionID)}`
+    );
+
     const session = await this.getSession(event.sessionID);
     if (!session) {
-      console.log(`Session ${event.sessionID} not found for permission request`);
+      console.log(`[octg][permission] session ${this.shortId(event.sessionID)} not mapped to telegram user`);
       return;
     }
 
@@ -95,7 +103,9 @@ export class PermissionHandler {
         timestamp: Date.now(),
       });
 
-      console.log(`Permission request ${event.permissionID} sent to user ${session.telegramUserId}`);
+      console.log(
+        `[octg][permission] delivered permission=${this.shortId(event.permissionID)} to user=${session.telegramUserId}`
+      );
     } catch (error) {
       console.error('Failed to send permission request:', error);
     }
@@ -112,6 +122,10 @@ export class PermissionHandler {
       await ctx.answerCbQuery('权限请求已过期');
       return;
     }
+
+    console.log(
+      `[octg][permission] response session=${this.shortId(pending.sessionId)} permission=${this.shortId(permissionId)} action=${allowed ? 'allow' : 'deny'} remember=${remember}`
+    );
 
     try {
       // 调用 OpenCode API 响应权限请求
@@ -187,6 +201,10 @@ export class PermissionHandler {
 
   private async autoDenyPermission(pending: PendingPermission): Promise<void> {
     try {
+      console.log(
+        `[octg][permission] auto-deny session=${this.shortId(pending.sessionId)} permission=${this.shortId(pending.permissionId)} after ${this.permissionTimeout}ms`
+      );
+
       await this.respondToPermission(
         pending.sessionId,
         pending.permissionId,

@@ -28,9 +28,34 @@ export class OpenCodeClient {
     this.config = config;
   }
 
+  private shouldLogRequest(path: string): boolean {
+    return path === '/session'
+      || path === '/config/providers'
+      || /^\/session\/[^/]+\/message$/.test(path)
+      || /^\/session\/[^/]+\/permissions\/[^/]+$/.test(path);
+  }
+
+  private summarizePath(path: string): string {
+    const sessionMessage = path.match(/^\/session\/([^/]+)\/message$/);
+    if (sessionMessage) {
+      return `/session/${sessionMessage[1].slice(0, 8)}/message`;
+    }
+
+    const permission = path.match(/^\/session\/([^/]+)\/permissions\/([^/]+)$/);
+    if (permission) {
+      return `/session/${permission[1].slice(0, 8)}/permissions/${permission[2].slice(0, 8)}`;
+    }
+
+    return path;
+  }
+
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.config.baseUrl.replace(/\/$/, '')}${path}`;
     const headers = new Headers(options.headers);
+    const method = options.method || 'GET';
+    const startedAt = Date.now();
+    const logRequest = this.shouldLogRequest(path);
+    const logPath = this.summarizePath(path);
 
     headers.set('Content-Type', 'application/json');
 
@@ -42,6 +67,10 @@ export class OpenCodeClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
+    if (logRequest) {
+      console.log(`[octg][opencode] ${method} ${logPath} started`);
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
@@ -51,6 +80,12 @@ export class OpenCodeClient {
 
       clearTimeout(timeoutId);
 
+       if (logRequest) {
+        console.log(
+          `[octg][opencode] ${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
+        );
+      }
+
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`HTTP ${response.status}: ${text}`);
@@ -59,6 +94,14 @@ export class OpenCodeClient {
       return (await response.json()) as T;
     } catch (error) {
       clearTimeout(timeoutId);
+
+      if (logRequest) {
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        console.error(
+          `[octg][opencode] ${method} ${logPath} failed after ${Date.now() - startedAt}ms - ${message}`
+        );
+      }
+
       throw error;
     }
   }

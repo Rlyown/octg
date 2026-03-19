@@ -43,8 +43,10 @@ export class SSEClient {
 
     this.eventSource = new EventSource(url);
 
+    console.log('[octg][sse] connecting to /event');
+
     this.eventSource.onopen = () => {
-      console.log('SSE connection opened');
+      console.log('[octg][sse] connection opened');
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -61,7 +63,7 @@ export class SSEClient {
     };
 
     this.eventSource.onerror = (error) => {
-      console.error('SSE error:', error);
+      console.error('[octg][sse] error:', error);
 
       if (this.isManualClose) {
         return;
@@ -71,7 +73,7 @@ export class SSEClient {
       this.eventSource = null;
 
       this.reconnectTimer = setTimeout(() => {
-        console.log('Reconnecting SSE...');
+        console.log(`[octg][sse] reconnecting in ${this.reconnectDelay}ms`);
         this.start();
       }, this.reconnectDelay);
     };
@@ -88,7 +90,7 @@ export class SSEClient {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
-      console.log('SSE connection closed');
+      console.log('[octg][sse] connection closed');
     }
   }
 
@@ -110,6 +112,10 @@ export class SSEClient {
   }
 
   private handleEvent(event: OpenCodeEvent): void {
+    if (event.type === 'session.permission.requested' || event.type === 'message.created') {
+      console.log(`[octg][sse] event ${event.type}`);
+    }
+
     const handlers = this.eventHandlers.get(event.type) || [];
     const wildcards = this.eventHandlers.get('*') || [];
 

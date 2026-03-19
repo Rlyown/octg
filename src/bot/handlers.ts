@@ -62,6 +62,28 @@ export class BotHandlers {
     this.setupHandlers();
   }
 
+  private shortId(value?: string): string {
+    if (!value) {
+      return 'unknown';
+    }
+
+    return value.slice(0, 8);
+  }
+
+  private summarizeOverrides(overrides: RequestOverrides): string {
+    const parts: string[] = [];
+
+    if (overrides.model) {
+      parts.push(`model=${overrides.model.providerID}/${overrides.model.modelID}`);
+    }
+
+    if (overrides.agent) {
+      parts.push(`agent=${overrides.agent}`);
+    }
+
+    return parts.length > 0 ? parts.join(' ') : 'none';
+  }
+
   private initSSE(): void {
     this.sseClient = new SSEClient(
       this.config.opencode.serverUrl,
@@ -576,6 +598,7 @@ AI 设置：
     if (!userId) return;
 
     const message = ctx.message as Message.TextMessage;
+    const requestStartedAt = Date.now();
 
     if (message.text?.startsWith('/')) {
       const [rawCommand] = message.text.slice(1).split(' ');
@@ -589,19 +612,35 @@ AI 设置：
 
     let session = this.sessions.get(userId);
     if (!session) {
+      console.log(`[octg][chat] user=${userId} stage=session_lookup result=miss`);
       session = await this.createSessionFromMessage(ctx, message.text);
       if (!session) return;
     } else {
+      console.log(`[octg][chat] user=${userId} stage=session_lookup result=hit session=${this.shortId(session.openCodeSessionId)}`);
       this.sessions.updateActivity(userId);
     }
 
     const processingMsg = await ctx.reply('🤔 思考中...');
 
     try {
+      const overrideStartedAt = Date.now();
+      console.log(`[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=overrides start`);
+      const overrides = await this.getOverrides(session);
+      console.log(
+        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=overrides ok duration=${Date.now() - overrideStartedAt}ms overrides=${this.summarizeOverrides(overrides)}`
+      );
+
+      console.log(
+        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request start textLength=${message.text.length}`
+      );
       const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
         message.text,
-        await this.getOverrides(session)
+        overrides
+      );
+
+      console.log(
+        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request ok duration=${Date.now() - requestStartedAt}ms parts=${response.parts.length}`
       );
 
       await ctx.deleteMessage(processingMsg.message_id);
@@ -618,6 +657,10 @@ AI 设置：
         await ctx.reply(text);
       }
     } catch (error) {
+      const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error(
+        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request failed duration=${Date.now() - requestStartedAt}ms error=${messageText}`
+      );
       await ctx.reply(`❌ 错误: ${error}`);
     }
   }
@@ -913,8 +956,10 @@ AI 设置：
     }
 
     const title = messageText.slice(0, 50).replace(/\n/g, ' ');
+    const startedAt = Date.now();
 
     try {
+      console.log(`[octg][chat] user=${userId} stage=session_create start title=${JSON.stringify(title)}`);
       const openCodeSession = await this.opencode.createSession(title);
 
       const session: TelegramSession = {
@@ -930,8 +975,15 @@ AI 设置：
       };
 
       this.sessions.set(session);
+      console.log(
+        `[octg][chat] user=${userId} stage=session_create ok duration=${Date.now() - startedAt}ms session=${this.shortId(openCodeSession.id)}`
+      );
       return session;
     } catch (error) {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error(
+        `[octg][chat] user=${userId} stage=session_create failed duration=${Date.now() - startedAt}ms error=${message}`
+      );
       await ctx.reply(`创建会话失败: ${error}`);
       return undefined;
     }

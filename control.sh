@@ -25,6 +25,7 @@ PROJECT_NAME="opencode-telegram"
 GLOBAL_CONFIG_DIR="${HOME}/.config/agent-toolkits"
 GLOBAL_ENV_FILE="${GLOBAL_CONFIG_DIR}/opencode-telegram.env"
 LOCAL_ENV_FILE="${SCRIPT_DIR}/.env"
+DEFAULT_OPENCODE_WORKDIR="${HOME}/GitProject"
 
 ENV_FILE="${LOCAL_ENV_FILE}"
 if [ -f "$GLOBAL_ENV_FILE" ]; then
@@ -78,9 +79,28 @@ is_macos() {
 is_systemd_available() {
     command -v systemctl > /dev/null 2>&1 && systemctl --user status > /dev/null 2>&1
 }
+
+get_opencode_workdir() {
+    local workdir="${WORKSPACE_PATH:-$DEFAULT_OPENCODE_WORKDIR}"
+
+    case "$workdir" in
+        "~")
+            workdir="$HOME"
+            ;;
+        ~/*)
+            workdir="$HOME/${workdir#~/}"
+            ;;
+    esac
+
+    printf '%s\n' "$workdir"
+}
+
 setup_opencode_service() {
     local opencode_path
+    local opencode_workdir
     opencode_path=$(which opencode)
+    opencode_workdir="$(get_opencode_workdir)"
+    mkdir -p "$opencode_workdir"
     
     if is_macos; then
         local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
@@ -92,6 +112,8 @@ setup_opencode_service() {
 <dict>
     <key>Label</key>
     <string>com.opencode.server</string>
+    <key>WorkingDirectory</key>
+    <string>${opencode_workdir}</string>
     <key>ProgramArguments</key>
     <array>
         <string>${opencode_path}</string>
@@ -131,6 +153,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=${opencode_path} serve --port 4096 --hostname 127.0.0.1
+WorkingDirectory=${opencode_workdir}
 Restart=on-failure
 RestartSec=5
 Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_PASSWORD:-}
@@ -168,9 +191,15 @@ start_opencode_service() {
         print_success "OpenCode server service started"
     else
         local opencode_path
+        local opencode_workdir
         opencode_path=$(which opencode)
-        nohup "$opencode_path" serve --port 4096 --hostname 127.0.0.1 > "${LOG_DIR}/opencode-server.log" 2>&1 &
-        echo $! > "${LOG_DIR}/opencode-server.pid"
+        opencode_workdir="$(get_opencode_workdir)"
+        mkdir -p "$opencode_workdir"
+        (
+            cd "$opencode_workdir" || exit 1
+            OPENCODE_SERVER_PASSWORD="${OPENCODE_PASSWORD:-}" nohup "$opencode_path" serve --port 4096 --hostname 127.0.0.1 > "${LOG_DIR}/opencode-server.log" 2>&1 &
+            echo $! > "${LOG_DIR}/opencode-server.pid"
+        )
         print_success "OpenCode server started (nohup)"
     fi
 }
@@ -469,6 +498,11 @@ load_env() {
     if [ -f "$ENV_FILE" ]; then
         export $(grep -v '^#' "$ENV_FILE" | xargs)
     fi
+
+    if [ -z "${WORKSPACE_PATH:-}" ]; then
+        WORKSPACE_PATH="$DEFAULT_OPENCODE_WORKDIR"
+        export WORKSPACE_PATH
+    fi
 }
 
 # Setup command
@@ -555,6 +589,7 @@ TELEGRAM_MODE=polling
 OPENCODE_SERVER_URL=http://localhost:4096
 OPENCODE_USERNAME=opencode
 OPENCODE_PASSWORD=$opencode_password
+WORKSPACE_PATH=$DEFAULT_OPENCODE_WORKDIR
 
 # Session Configuration
 SESSION_STORAGE=file

@@ -46,9 +46,12 @@ Edit `.env`:
 TELEGRAM_BOT_TOKEN=your_bot_token
 OPENCODE_PASSWORD=your_opencode_password
 
-# Optional
-WORKSPACE_PATH=/path/to/your/project
+# Optional: default OpenCode auto-start working directory
+WORKSPACE_PATH=~/GitProject
 ```
+
+When `atk plugins telegram start` or `atk plugins telegram host` auto-starts `opencode serve`,
+it uses `WORKSPACE_PATH` as the server working directory. If unset, it defaults to `~/GitProject`.
 
 ## Deployment
 
@@ -57,7 +60,7 @@ WORKSPACE_PATH=/path/to/your/project
 **Terminal 1 - Start OpenCode Server:**
 
 ```bash
-cd /path/to/your/project
+cd ~/GitProject
 
 export OPENCODE_SERVER_PASSWORD="your-password"
 opencode serve --port 4096 --hostname 127.0.0.1

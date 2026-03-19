@@ -73,7 +73,7 @@ make clean
 |----------|----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | - | Telegram bot token |
 | `OPENCODE_PASSWORD` | Yes | - | OpenCode server password |
-| `WORKSPACE_PATH` | No | `./workspace` | Local project path |
+| `WORKSPACE_PATH` | No | `~/GitProject` | Default `opencode serve` working directory for auto-start |
 | `CONFIG_PATH` | No | `~/.config/opencode` | OpenCode config path |
 | `DATA_PATH` | No | `~/.local/share/opencode` | OpenCode data path |
 
@@ -90,6 +90,9 @@ curl -u opencode:your-password http://127.0.0.1:4096/global/health
 ```bash
 WORKSPACE_PATH=/Users/username/projects/my-project
 ```
+
+When `atk` auto-starts OpenCode, it now launches `opencode serve` inside `WORKSPACE_PATH`.
+If you do not set it, the default working directory is `~/GitProject`.
 
 ### Re-run setup
 

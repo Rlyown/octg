@@ -22,7 +22,7 @@ Standalone Telegram Bot for OpenCode Server with host-based deployment.
 
 ```bash
 # Clone or download
-cd opencode-telegram-plugin
+cd octg
 
 # Install dependencies
 npm install
@@ -50,8 +50,8 @@ OPENCODE_PASSWORD=your_opencode_password
 WORKSPACE_PATH=~/GitProject
 ```
 
-When `atk plugins telegram start` or `atk plugins telegram host` auto-starts `opencode serve`,
-it uses `WORKSPACE_PATH` as the server working directory. If unset, it defaults to `~/GitProject`.
+When `./control.sh host` auto-starts `opencode serve`, it uses `WORKSPACE_PATH`
+as the server working directory. If unset, it defaults to `~/GitProject`.
 
 ## Deployment
 
@@ -69,7 +69,7 @@ opencode serve --port 4096 --hostname 127.0.0.1
 **Terminal 2 - Start Telegram Plugin:**
 
 ```bash
-cd opencode-telegram-plugin
+cd octg
 
 export TELEGRAM_BOT_TOKEN="your-token"
 export OPENCODE_SERVER_URL="http://127.0.0.1:4096"
@@ -78,7 +78,28 @@ export OPENCODE_PASSWORD="your-password"
 npm start
 ```
 
-Use `atk plugins telegram setup` to write config, then `atk plugins telegram start` to run in background (recommended), or `atk plugins telegram host` to run in foreground.
+Using the provided control script:
+
+```bash
+# Interactive first-time setup
+./control.sh setup
+
+# Run in foreground
+./control.sh host
+
+# Or build and start directly
+npm run build
+npm start
+```
+
+Other useful commands:
+
+```bash
+./control.sh status
+./control.sh logs
+./control.sh restart
+./control.sh stop
+```
 
 ## Commands
 

@@ -91,47 +91,26 @@ export class BotHandlers {
       this.config.opencode.password
     );
 
-    this.sseClient.on('session.permission.requested', (event) => {
-      this.permissionHandler.handlePermissionRequest(event.data as {
+    this.sseClient.on('permission.asked', (event) => {
+      const props = event.properties as {
+        id: string;
         sessionID: string;
-        permissionID: string;
-        description?: string;
-        tool?: string;
-        action?: string;
-      });
-    });
-
-    this.sseClient.on('message.created', (event) => {
-      this.handleSSEMessage(event.data as {
-        sessionID?: string;
-        message?: { role?: string; parts?: Array<{ type: string; text?: string }> };
+        permission: string;
+        patterns: string[];
+        metadata: Record<string, unknown>;
+        always: string[];
+        tool?: { messageID: string; callID: string };
+      };
+      this.permissionHandler.handlePermissionRequest({
+        sessionID: props.sessionID,
+        permissionID: props.id,
+        description: props.permission,
+        tool: props.tool?.callID,
+        action: props.patterns?.[0],
       });
     });
 
     this.sseClient.start();
-  }
-
-  private async handleSSEMessage(data: {
-    sessionID?: string;
-    message?: { role?: string; parts?: Array<{ type: string; text?: string }> };
-  }): Promise<void> {
-    if (!data.sessionID || data.message?.role !== 'assistant') return;
-
-    const sessions = await this.sessions.getAll();
-    const session = sessions.find((s: TelegramSession) => s.openCodeSessionId === data.sessionID);
-    if (!session) return;
-
-    const text = data.message?.parts?.find(p => p.type === 'text')?.text;
-    if (!text || text.length < 10) return;
-
-    try {
-      await this.bot.telegram.sendMessage(
-        session.telegramChatId,
-        `🤖 AI 回复:\n\n${text.slice(0, 500)}${text.length > 500 ? '...' : ''}`
-      );
-    } catch (error) {
-      console.error('Failed to send SSE message to Telegram:', error);
-    }
   }
 
   private setupHandlers(): void {

@@ -126,6 +126,7 @@ export function formatSessionOverview(params: {
     '用法：',
     '• /sessions <序号> 按列表序号载入 session',
     '• /sessions <id或前缀> 载入已有 session',
+    '• /sessions remove <序号或id> 删除 session',
     '• /sessions <关键词> 检索 session',
     '• 用下方按钮翻页',
     '• /new [title] 创建新 session',

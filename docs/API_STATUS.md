@@ -26,7 +26,7 @@
 
 ### 会话管理
 - ✅ `/new [title]` - 创建新的 OpenCode 会话
-- ✅ `/sessions` - 查看、检索或按钮翻页切换会话
+- ✅ `/sessions` - 查看、检索、删除或按钮翻页切换会话
 - ✅ `/rename <新名称>` - 重命名当前会话
 - ✅ `/fork [message_id]` - 分叉当前会话
 - ✅ `/abort` - 中止正在运行的会话

@@ -7,7 +7,7 @@ const BOT_COMMANDS = [
   { command: 'help', description: '显示帮助信息' },
   { command: 'status', description: '检查 OpenCode 服务器状态' },
   { command: 'new', description: '创建新的 OpenCode 会话' },
-  { command: 'sessions', description: '查看、检索或按钮翻页切换会话' },
+  { command: 'sessions', description: '查看、切换、删除或翻页浏览会话' },
   { command: 'model', description: '查看、列出或设置当前模型' },
   { command: 'agents', description: '查看、列出或设置当前 agent' },
   { command: 'ls', description: '列出目录内容 /ls [path]' },

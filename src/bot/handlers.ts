@@ -311,7 +311,7 @@ export class BotHandlers {
 发送任意消息创建新会话，或使用 /new [标题] 手动创建。
 
 可用命令：
-/sessions - 查看/切换会话
+/sessions - 查看/切换/删除会话
 /new [title] - 创建新会话
 /rename <名称> - 重命名会话
 /cwd - 查看当前目录
@@ -348,7 +348,7 @@ export class BotHandlers {
 
 会话管理：
 /new [title] - 创建新会话
-/sessions - 查看/切换会话
+/sessions - 查看/切换/删除会话
 /rename <名称> - 重命名会话
 /fork [id] - 分叉会话
 /abort - 中止会话
@@ -725,6 +725,11 @@ AI 设置：
     }
 
     const parsed = this.parseSessionsArgs(args);
+
+    if (parsed.removeTarget) {
+      await this.removeSession(ctx, parsed.removeTarget);
+      return;
+    }
 
     if (parsed.index !== undefined) {
       await this.attachToSessionByIndex(ctx, parsed.index);
@@ -1108,9 +1113,21 @@ AI 设置：
     });
   }
 
-  private parseSessionsArgs(args: string[]): { index?: number; query?: string; lookup?: string } {
+  private parseSessionsArgs(args: string[]): {
+    index?: number;
+    query?: string;
+    lookup?: string;
+    removeTarget?: string;
+  } {
     if (args.length === 0) {
       return {};
+    }
+
+    const [command, ...rest] = args;
+    if ((command === 'remove' || command === 'rm' || command === 'delete' || command === 'del') && rest.length > 0) {
+      return {
+        removeTarget: rest.join(' ').trim(),
+      };
     }
 
     if (args.length === 1 && /^\d+$/.test(args[0])) {
@@ -1124,6 +1141,83 @@ AI 设置：
     return {
       query: args.join(' ').trim() || undefined,
     };
+  }
+
+  private async removeSession(ctx: Context<Update.MessageUpdate>, target: string): Promise<void> {
+    const userId = ctx.from?.id.toString();
+    if (!userId) {
+      await ctx.reply('无法获取用户信息');
+      return;
+    }
+
+    try {
+      const sessions = await this.opencode.listSessions();
+      const resolved = this.resolveSessionTarget(sessions, target);
+
+      if (resolved.error) {
+        await ctx.reply(resolved.error);
+        return;
+      }
+
+      const sessionToRemove = resolved.session!;
+      await this.opencode.deleteSession(sessionToRemove.id);
+
+      const currentSession = this.sessions.get(userId);
+      const isCurrent = currentSession?.openCodeSessionId === sessionToRemove.id;
+      if (isCurrent) {
+        this.sessions.delete(userId);
+      }
+
+      await ctx.reply(
+        `✅ 已删除 session\n\n` +
+        `🪪 ${sessionToRemove.id.slice(0, 12)}...\n` +
+        `🏷️ ${sessionToRemove.title || 'Untitled'}${isCurrent ? '\n\n当前绑定也已清除，发送任意消息或用 /new 可创建新会话。' : ''}`
+      );
+    } catch (error) {
+      await ctx.reply(`❌ 删除 session 失败: ${error}`);
+    }
+  }
+
+  private resolveSessionTarget(
+    sessions: Array<{ id: string; title?: string }>,
+    target: string
+  ): { session?: { id: string; title?: string }; error?: string } {
+    const normalized = target.trim();
+    if (!normalized) {
+      return {
+        error: '❌ 请提供要删除的 session 序号或 id\n\n例如：/sessions remove 3',
+      };
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      const index = Number.parseInt(normalized, 10);
+      const session = sessions[index - 1];
+      if (!session) {
+        return {
+          error: `❌ 找不到序号 ${index} 对应的 session\n\n用 /sessions 查看可用列表`,
+        };
+      }
+
+      return { session };
+    }
+
+    const exact = sessions.find(session => session.id === normalized);
+    const matches = exact ? [exact] : sessions.filter(session => session.id.startsWith(normalized));
+
+    if (matches.length === 0) {
+      return {
+        error: `❌ 找不到 session: ${normalized}\n\n用 /sessions 查看可用列表`,
+      };
+    }
+
+    if (matches.length > 1) {
+      const options = matches.slice(0, 5).map(session => `${session.id.slice(0, 12)}...  ${session.title || 'Untitled'}`);
+      return {
+        error: `⚠️ 前缀匹配到多个 session，请提供更长的 id:\n\n${options.join('\n')}`,
+      };
+    }
+
+    return { session: matches[0] };
   }
 
   private getSessionsPageSize(): number {

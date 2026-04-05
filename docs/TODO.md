@@ -2,35 +2,39 @@
 
 ## Current unstable areas
 
-- OpenCode `1.2.27` `serve` endpoint `POST /session/:id/command` returns HTTP 500 for slash commands.
-- This affects forwarded slash-command behavior in general, not only `/agents`.
-- Directly observed failing examples over `serve`: `help`, `model`, `cd`, `agents`, and unknown commands.
+| 名称 | 描述 | 优先级 |
+|------|------|--------|
+| `session管理` | 每个session配置根目录，project信息，对齐opencode server API； 对话开始时提示当前 session，或默认进入第一个session | 高 |
+| `configer` | 当前启动脚本中涉及项目路径，白名单配置等路径，考虑在同一个agent下管理多个项目，因此白名单也只需要一个；另外opencode server启动有问题 | 高 |
+| `对话支持富文本` | 当前启动脚本中涉及项目路径，白名单配置等路径，考虑在同一个agent下管理多个项目，因此白名单也只需要一个；另外opencode server启动有问题 | 高 |
+| `POST /session/:id/command` 500 | OpenCode `1.2.27` `serve` endpoint 对 slash commands 返回 HTTP 500，影响所有转发的斜杠命令，包括 `help`、`model`、`cd`、`agents` 及未知命令 | 高 |
 
 ## Current workaround in octg
 
-- Keep normal chat messages on `/session/:id/message`.
-- Keep session management local in Telegram (`/sessions`, `/new`).
-- Keep `/model` local: show current override, list models via local CLI, clear, set override.
-- Keep `/agents` local: show current override, list agents via local CLI, clear, set override.
-- Disable generic slash-command forwarding in Telegram until `serve /command` is stable.
+| 名称 | 描述 | 优先级 |
+|------|------|--------|
+| 普通对话走 `/message` | 保持 chat 消息走 `POST /session/:id/message` | - |
+| session 管理本地化 | `/sessions`、`/new` 在 Telegram 侧本地处理 | - |
+| `/model` 本地化 | 显示当前 override、本地列出模型、清除/设置 override | - |
+| `/agents` 本地化 | 显示当前 override、本地列出 agents、清除/设置 override | - |
+| 禁用 slash-command 转发 | 在 `serve /command` 稳定之前，禁用 Telegram 通用斜杠命令转发 | - |
 
 ## Backlog
 
-- Retest `POST /session/:id/command` after upgrading OpenCode.
-- Re-check whether command payload schema changed again in newer OpenCode versions.
-- Re-test representative commands after upgrade:
-  - `/help`
-  - `/model`
-  - `/agents`
-  - `/cwd`
-  - generic forwarded slash commands
-- If `serve /command` becomes stable, consider restoring Telegram forwarding for selected commands.
-- If `serve /command` remains unstable, evaluate whether ACP exposes a safer command-execution path.
-- If neither `serve` nor ACP can support slash commands reliably, keep only local Telegram wrappers for high-value commands.
+| 名称 | 描述 | 优先级 |
+|------|------|--------|
+| 升级后重测 `/command` | 升级 OpenCode 后重新测试 `POST /session/:id/command` | 高 |
+| 确认命令 payload schema | 检查新版 OpenCode 中命令 payload schema 是否再次变更 | 中 |
+| 代表性命令回归测试 | 升级后重测 `/help`、`/model`、`/agents`、`/cwd` 及通用转发命令 | 中 |
+| 恢复命令转发 | 若 `serve /command` 稳定，考虑为部分命令恢复 Telegram 转发 | 低 |
+| 评估 ACP 路径 | 若 `serve /command` 持续不稳定，评估 ACP 是否提供更安全的命令执行路径 | 低 |
+| 仅保留本地高价值命令 | 若 `serve` 和 ACP 均不可靠，只保留高价值命令的本地 Telegram wrapper | 低 |
 
 ## Candidate future adaptations
 
-- Add `/models` as a dedicated Telegram command instead of `/model list`.
-- Validate `/agents <name>` against local `opencode agent list` output before saving.
-- Add version-gated behavior so `octg` can enable forwarding only for OpenCode versions known to support it.
-- Add a small runtime self-check on startup to detect whether `serve /command` is healthy.
+| 名称 | 描述 | 优先级 |
+|------|------|--------|
+| 独立 `/models` 命令 | 新增 `/models` 作为专用 Telegram 命令，替代 `/model list` | 低 |
+| `/agents <name>` 校验 | 保存前对照本地 `opencode agent list` 输出校验 agent 名称 | 低 |
+| 版本门控转发 | 添加版本判断，仅对已知支持 `/command` 的 OpenCode 版本启用转发 | 低 |
+| 启动时自检 | 启动时自动检测 `serve /command` 是否健康 | 中 |

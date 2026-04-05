@@ -12,7 +12,7 @@ const BOT_COMMANDS = [
   { command: 'agents', description: '查看、列出或设置当前 agent' },
   { command: 'ls', description: '列出目录内容 /ls [path]' },
   { command: 'cat', description: '读取文件内容 /cat <file>' },
-  { command: 'code', description: '生成代码 /code <描述>' },
+  { command: 'task', description: '提交异步任务 /task <描述>' },
   { command: 'shell', description: '执行 shell 命令 /shell <cmd>' },
   { command: 'todos', description: '查看待办事项' },
   { command: 'history', description: '查看会话历史消息 /history [数量]' },

@@ -122,7 +122,7 @@ Other useful commands:
 | `/agents <name>` | Set the agent override for future messages | `/agents build` |
 | `/ls [path]` | List files | `/ls src` |
 | `/cat <file>` | Read file | `/cat README.md` |
-| `/code <desc>` | Generate code | `/code React button` |
+| `/task <desc>` | Submit async task (long-running) | `/task create a React button` |
 | `/shell <cmd>` | Run shell command | `/shell ls -la` |
 | `/todos` | List todos | `/todos` |
 

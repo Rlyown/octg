@@ -34,16 +34,18 @@ const BOT_COMMANDS = [
   { command: 'commands', description: '列出 OpenCode 内置命令' },
   { command: 'config', description: '查看当前配置' },
   { command: 'providers', description: '列出所有模型提供商' },
-  { command: 'status-all', description: '查看所有会话状态' },
+  { command: 'status_all', description: '查看所有会话状态' },
   { command: 'children', description: '查看当前会话的子会话' },
   { command: 'init', description: '分析项目并创建 AGENTS.md' },
   { command: 'symbol', description: '查找符号 /symbol <查询>' },
-  { command: 'git-status', description: '查看 Git 文件状态' },
+  { command: 'git_status', description: '查看 Git 文件状态' },
   { command: 'tools', description: '列出可用工具' },
 ];
 
 export function createBot(config: PluginConfig['telegram']): Telegraf {
-  const bot = new Telegraf(config.botToken);
+  const bot = new Telegraf(config.botToken, {
+    handlerTimeout: config.handlerTimeout,
+  });
 
   bot.telegram.getMe().then((botInfo: { username?: string }) => {
     logger.info(`Bot started: @${botInfo.username}`);

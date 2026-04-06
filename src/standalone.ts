@@ -3,7 +3,7 @@ import { OpenCodeClient } from './opencode/client.js';
 import { SessionManager } from './session/manager.js';
 import { WhitelistManager } from './auth/whitelist.js';
 import { createBot, setupPolling } from './bot/index.js';
-import { BotHandlers } from './bot/handlers.js';
+import { BotHandlers } from './bot/handlers/index.js';
 import { Notifier } from './bot/notifier.js';
 
 async function main() {

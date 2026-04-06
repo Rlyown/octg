@@ -1,5 +1,4 @@
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { dirname } from 'path';
+import { readFileSync, existsSync } from 'fs';
 import type { PluginConfig } from '../types.js';
 
 export function loadConfig(): PluginConfig {
@@ -22,11 +21,6 @@ function getDefaultConfig(): PluginConfig {
       serverUrl: 'http://localhost:4096',
       username: 'opencode',
       requestTimeout: 60000,
-    },
-    session: {
-      storage: 'memory',
-      filePath: './data/sessions.json',
-      ttl: 86400,
     },
     app: {
       logLevel: 'info',
@@ -76,10 +70,6 @@ function loadEnvConfig(): Partial<PluginConfig> {
     { env: 'OPENCODE_USERNAME', path: 'opencode.username' },
     { env: 'OPENCODE_PASSWORD', path: 'opencode.password' },
     { env: 'OPENCODE_REQUEST_TIMEOUT', path: 'opencode.requestTimeout', parser: (v) => parseInt(v, 10) },
-    // Session
-    { env: 'SESSION_STORAGE', path: 'session.storage' },
-    { env: 'SESSION_FILE_PATH', path: 'session.filePath' },
-    { env: 'SESSION_TTL', path: 'session.ttl', parser: (v) => parseInt(v, 10) },
     // App
     { env: 'LOG_LEVEL', path: 'app.logLevel' },
     { env: 'MAX_MESSAGE_LENGTH', path: 'app.maxMessageLength', parser: (v) => parseInt(v, 10) },
@@ -131,11 +121,6 @@ function mergeConfig(
       ...fromFile.opencode,
       ...fromEnv.opencode,
     },
-    session: {
-      ...defaults.session,
-      ...fromFile.session,
-      ...fromEnv.session,
-    },
     app: {
       ...defaults.app,
       ...fromFile.app,
@@ -164,22 +149,3 @@ export function validateConfig(config: PluginConfig): void {
   }
 }
 
-export function saveSessionData(filePath: string, data: unknown): void {
-  const dir = dirname(filePath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
-
-export function loadSessionData<T>(filePath: string): T | null {
-  if (!existsSync(filePath)) {
-    return null;
-  }
-  try {
-    const content = readFileSync(filePath, 'utf-8');
-    return JSON.parse(content) as T;
-  } catch {
-    return null;
-  }
-}

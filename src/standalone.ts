@@ -14,7 +14,6 @@ async function main() {
   console.log('Configuration loaded:');
   console.log(`  Telegram Mode: ${config.telegram.mode}`);
   console.log(`  OpenCode Server: ${config.opencode.serverUrl}`);
-  console.log(`  Session Storage: ${config.session.storage}`);
   console.log();
 
   // Initialize OpenCode client
@@ -36,9 +35,31 @@ async function main() {
   const health = await opencode.health();
   console.log(`✅ Connected to OpenCode server (v${health.version})\n`);
 
-  // Initialize session manager
-  const sessionManager = new SessionManager(config.session);
-  console.log(`✅ Session manager initialized (${config.session.storage} mode)\n`);
+  // Initialize session manager and auto-select session from OC server
+  const sessionManager = new SessionManager();
+
+  const ocSessions = await opencode.listSessions();
+  if (ocSessions.length > 0) {
+    const first = ocSessions[0];
+    sessionManager.set({
+      telegramChatId: '',
+      openCodeSessionId: first.id,
+      openCodeSessionTitle: first.title,
+      createdAt: new Date(first.time.created),
+      lastActivity: new Date(first.time.updated),
+    });
+    console.log(`✅ Auto-selected session: ${first.title || first.id.slice(0, 12)}\n`);
+  } else {
+    const created = await opencode.createSession();
+    sessionManager.set({
+      telegramChatId: '',
+      openCodeSessionId: created.id,
+      openCodeSessionTitle: created.title,
+      createdAt: new Date(created.time.created),
+      lastActivity: new Date(created.time.updated),
+    });
+    console.log(`✅ No sessions found, created new session: ${created.id.slice(0, 12)}\n`);
+  }
 
   // Create Telegram bot
   const bot = createBot(config.telegram);

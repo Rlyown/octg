@@ -322,28 +322,30 @@ export class BotHandlers {
     const userId = ctx.from?.id.toString();
     const chatId = ctx.chat?.id.toString();
 
-    if (!userId || !chatId) {
-      await ctx.reply('无法获取用户信息');
+    if (!chatId) {
+      await ctx.reply('无法获取会话信息');
       return null;
     }
 
     // Check allowed users
     if (this.config.telegram.allowedUserIds.length > 0) {
-      if (!this.config.telegram.allowedUserIds.includes(userId)) {
+      if (!userId || !this.config.telegram.allowedUserIds.includes(userId)) {
         await ctx.reply('你没有权限使用此 Bot');
         return null;
       }
     }
 
-    let session = this.sessions.get(userId);
-
-    if (session) {
-      this.sessions.updateActivity(userId);
-      return session;
+    const session = this.sessions.get();
+    if (!session) {
+      await ctx.reply('还没有会话，使用 /new [标题] 创建。');
+      return null;
     }
 
-    await ctx.reply('还没有会话。发送任意消息创建新会话，或使用 /new [标题] 手动创建。');
-    return null;
+    if (!session.telegramChatId) {
+      session.telegramChatId = chatId;
+    }
+    this.sessions.updateActivity();
+    return session;
   }
 
   private async handleStart(ctx: Context<Update.MessageUpdate>): Promise<void> {
@@ -454,7 +456,6 @@ AI 设置：
 
       if (liveSession?.title && liveSession.title !== session.openCodeSessionTitle) {
         session.openCodeSessionTitle = liveSession.title;
-        this.sessions.set(session);
       }
 
       await ctx.reply(
@@ -476,39 +477,21 @@ AI 设置：
   }
 
   private async handleNewSession(ctx: Context<Update.MessageUpdate>): Promise<void> {
-    const userId = ctx.from?.id.toString();
-    if (!userId) return;
-
     const message = ctx.message as Message.TextMessage;
     const args = message.text.split(' ').slice(1);
     const title = args.join(' ').trim() || undefined;
+    const oldSession = this.sessions.get();
 
-    // Delete old session
-    const oldSession = this.sessions.get(userId);
-    if (oldSession) {
-      try {
-        await this.opencode.deleteSession(oldSession.openCodeSessionId);
-      } catch {
-        // Ignore error
-      }
-      this.sessions.delete(userId);
-    }
-
-    // Create new session
     try {
       const openCodeSession = await this.opencode.createSession(title);
       const session: TelegramSession = {
-        telegramUserId: userId,
         telegramChatId: ctx.chat?.id.toString() || '',
         openCodeSessionId: openCodeSession.id,
         openCodeSessionTitle: openCodeSession.title,
-        username: ctx.from?.username,
-        firstName: ctx.from?.first_name,
-        lastName: ctx.from?.last_name,
         preferredModel: oldSession?.preferredModel,
         preferredAgent: oldSession?.preferredAgent,
-        createdAt: new Date(),
-        lastActivity: new Date(),
+        createdAt: new Date(openCodeSession.time.created),
+        lastActivity: new Date(openCodeSession.time.updated),
       };
 
       this.sessions.set(session);
@@ -681,15 +664,16 @@ AI 设置：
       return;
     }
 
-    let session = this.sessions.get(userId);
+    let session = this.sessions.get();
     if (!session) {
-      console.log(`[octg][chat] user=${userId} stage=session_lookup result=miss`);
-      session = await this.createSessionFromMessage(ctx, message.text);
-      if (!session) return;
-    } else {
-      console.log(`[octg][chat] user=${userId} stage=session_lookup result=hit session=${this.shortId(session.openCodeSessionId)}`);
-      this.sessions.updateActivity(userId);
+      await ctx.reply('还没有会话，使用 /new [标题] 创建。');
+      return;
     }
+    if (!session.telegramChatId) {
+      session.telegramChatId = ctx.chat?.id.toString() || '';
+      await ctx.reply(`📎 已关联到当前 session\n\n🪪 ${this.shortId(session.openCodeSessionId)}\n🏷️ ${session.openCodeSessionTitle || 'Untitled'}`);
+    }
+    this.sessions.updateActivity();
 
     const processingMsg = await ctx.reply('🤔 思考中...');
 
@@ -756,7 +740,7 @@ AI 设置：
 
     try {
       const sessions = await this.opencode.listSessions();
-      const currentSession = this.sessions.get(userId);
+      const currentSession = this.sessions.get();
       const filteredSessions = this.filterSessions(sessions, options.query);
       const currentPage = Math.max(1, options.page ?? 1);
       const totalPages = Math.max(1, Math.ceil(filteredSessions.length / this.getSessionsPageSize()));
@@ -1019,52 +1003,6 @@ AI 设置：
     return undefined;
   }
 
-  private async createSessionFromMessage(
-    ctx: Context<Update.MessageUpdate>,
-    messageText: string
-  ): Promise<TelegramSession | undefined> {
-    const userId = ctx.from?.id.toString();
-    const chatId = ctx.chat?.id.toString();
-
-    if (!userId || !chatId) {
-      await ctx.reply('无法获取用户信息');
-      return;
-    }
-
-    const title = messageText.slice(0, 50).replace(/\n/g, ' ');
-    const startedAt = Date.now();
-
-    try {
-      console.log(`[octg][chat] user=${userId} stage=session_create start title=${JSON.stringify(title)}`);
-      const openCodeSession = await this.opencode.createSession(title);
-
-      const session: TelegramSession = {
-        telegramUserId: userId,
-        telegramChatId: chatId,
-        openCodeSessionId: openCodeSession.id,
-        openCodeSessionTitle: openCodeSession.title,
-        username: ctx.from?.username,
-        firstName: ctx.from?.first_name,
-        lastName: ctx.from?.last_name,
-        createdAt: new Date(),
-        lastActivity: new Date(),
-      };
-
-      this.sessions.set(session);
-      console.log(
-        `[octg][chat] user=${userId} stage=session_create ok duration=${Date.now() - startedAt}ms session=${this.shortId(openCodeSession.id)}`
-      );
-      return session;
-    } catch (error) {
-      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      console.error(
-        `[octg][chat] user=${userId} stage=session_create failed duration=${Date.now() - startedAt}ms error=${message}`
-      );
-      await ctx.reply(`创建会话失败: ${error}`);
-      return undefined;
-    }
-  }
-
   private async handleSessionsPage(ctx: Context<Update.CallbackQueryUpdate>): Promise<void> {
     if (!(await this.checkWhitelist(ctx))) {
       if ('answerCbQuery' in ctx) {
@@ -1117,23 +1055,16 @@ AI 设置：
       }
 
       const openCodeSession = await this.opencode.getSession(prefixMatches[0].id);
-      const oldSession = this.sessions.get(userId);
-      if (oldSession) {
-        this.sessions.delete(userId);
-      }
+      const oldSession = this.sessions.get();
 
       const session: TelegramSession = {
-        telegramUserId: userId,
         telegramChatId: chatId,
         openCodeSessionId: openCodeSession.id,
         openCodeSessionTitle: openCodeSession.title,
-        username: ctx.from?.username,
-        firstName: ctx.from?.first_name,
-        lastName: ctx.from?.last_name,
         preferredModel: oldSession?.preferredModel,
         preferredAgent: oldSession?.preferredAgent,
-        createdAt: new Date(),
-        lastActivity: new Date(),
+        createdAt: new Date(openCodeSession.time.created),
+        lastActivity: new Date(openCodeSession.time.updated),
       };
 
       this.sessions.set(session);
@@ -1233,10 +1164,10 @@ AI 设置：
       const sessionToRemove = resolved.session!;
       await this.opencode.deleteSession(sessionToRemove.id);
 
-      const currentSession = this.sessions.get(userId);
+      const currentSession = this.sessions.get();
       const isCurrent = currentSession?.openCodeSessionId === sessionToRemove.id;
       if (isCurrent) {
-        this.sessions.delete(userId);
+        this.sessions.clear();
       }
 
       await ctx.reply(

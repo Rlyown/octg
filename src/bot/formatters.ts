@@ -112,7 +112,7 @@ export function formatSessionOverview(params: {
     const isCurrent = session.id === params.currentSessionId ? ' 👈' : '';
     const title = session.title || 'Untitled';
     const shortId = `${session.id.slice(0, 12)}...`;
-    const date = session.updatedAt ? new Date(session.updatedAt).toLocaleDateString() : 'Unknown';
+    const date = session.time?.updated ? new Date(session.time.updated).toLocaleDateString() : 'Unknown';
     return `${startIndex + index + 1}. ${shortId}${isCurrent}\n   ${title}\n   ${date}`;
   });
 

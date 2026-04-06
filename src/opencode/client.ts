@@ -13,6 +13,7 @@ import type {
   SessionDiff,
   MessageDetail,
 } from '../types.js';
+import { getLogger } from '../logger.js';
 
 interface ClientConfig {
   baseUrl: string;
@@ -23,6 +24,7 @@ interface ClientConfig {
 
 export class OpenCodeClient {
   private config: ClientConfig;
+  private logger = getLogger('opencode');
 
   constructor(config: ClientConfig) {
     this.config = config;
@@ -68,7 +70,7 @@ export class OpenCodeClient {
     const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
     if (logRequest) {
-      console.log(`[octg][opencode] ${method} ${logPath} started`);
+      this.logger.debug(`${method} ${logPath} started`);
     }
 
     try {
@@ -80,9 +82,9 @@ export class OpenCodeClient {
 
       clearTimeout(timeoutId);
 
-       if (logRequest) {
-        console.log(
-          `[octg][opencode] ${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
+      if (logRequest) {
+        this.logger.debug(
+           `${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
         );
       }
 
@@ -97,8 +99,8 @@ export class OpenCodeClient {
 
       if (logRequest) {
         const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-        console.error(
-          `[octg][opencode] ${method} ${logPath} failed after ${Date.now() - startedAt}ms - ${message}`
+        this.logger.error(
+          `${method} ${logPath} failed after ${Date.now() - startedAt}ms - ${message}`
         );
       }
 

@@ -4,6 +4,7 @@ import type { Telegraf } from 'telegraf';
 import type { OpenCodeClient } from './client.js';
 import type { SessionManager } from '../session/manager.js';
 import type { TelegramSession } from '../types.js';
+import { getLogger } from '../logger.js';
 
 export interface PermissionRequest {
   sessionID: string;
@@ -28,6 +29,7 @@ export class PermissionHandler {
   private sessions: SessionManager;
   private pendingPermissions: Map<string, PendingPermission> = new Map();
   private permissionTimeout = 60000; // 60秒超时
+  private logger = getLogger('permission');
 
   constructor(
     bot: Telegraf,
@@ -53,13 +55,13 @@ export class PermissionHandler {
     tool?: string;
     action?: string;
   }): Promise<void> {
-    console.log(
-      `[octg][permission] requested session=${this.shortId(event.sessionID)} permission=${this.shortId(event.permissionID)}`
+    this.logger.info(
+      `requested session=${this.shortId(event.sessionID)} permission=${this.shortId(event.permissionID)}`
     );
 
     const session = await this.getSession(event.sessionID);
     if (!session) {
-      console.log(`[octg][permission] session ${this.shortId(event.sessionID)} not mapped to telegram user`);
+      this.logger.info(`session ${this.shortId(event.sessionID)} not mapped to telegram user`);
       return;
     }
 
@@ -103,11 +105,11 @@ export class PermissionHandler {
         timestamp: Date.now(),
       });
 
-      console.log(
-        `[octg][permission] delivered permission=${this.shortId(event.permissionID)} to user=${session.telegramUserId}`
+      this.logger.info(
+        `delivered permission=${this.shortId(event.permissionID)} to user=${session.telegramUserId}`
       );
     } catch (error) {
-      console.error('Failed to send permission request:', error);
+      this.logger.error('Failed to send permission request:', error);
     }
   }
 
@@ -123,8 +125,8 @@ export class PermissionHandler {
       return;
     }
 
-    console.log(
-      `[octg][permission] response session=${this.shortId(pending.sessionId)} permission=${this.shortId(permissionId)} action=${allowed ? 'allow' : 'deny'} remember=${remember}`
+    this.logger.info(
+      `response session=${this.shortId(pending.sessionId)} permission=${this.shortId(permissionId)} action=${allowed ? 'allow' : 'deny'} remember=${remember}`
     );
 
     try {
@@ -149,7 +151,7 @@ export class PermissionHandler {
 
       await ctx.answerCbQuery(allowed ? '已允许' : '已拒绝');
     } catch (error) {
-      console.error('Failed to handle permission response:', error);
+      this.logger.error('Failed to handle permission response:', error);
       await ctx.answerCbQuery('处理失败');
     }
   }
@@ -201,8 +203,8 @@ export class PermissionHandler {
 
   private async autoDenyPermission(pending: PendingPermission): Promise<void> {
     try {
-      console.log(
-        `[octg][permission] auto-deny session=${this.shortId(pending.sessionId)} permission=${this.shortId(pending.permissionId)} after ${this.permissionTimeout}ms`
+      this.logger.info(
+        `auto-deny session=${this.shortId(pending.sessionId)} permission=${this.shortId(pending.permissionId)} after ${this.permissionTimeout}ms`
       );
 
       await this.respondToPermission(
@@ -219,7 +221,7 @@ export class PermissionHandler {
         `⏱️ 已超时自动拒绝\n\n${pending.description}`
       );
     } catch (error) {
-      console.error('Failed to auto-deny permission:', error);
+      this.logger.error('Failed to auto-deny permission:', error);
     }
   }
 

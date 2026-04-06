@@ -1,4 +1,5 @@
 import { EventSource } from 'eventsource';
+import { getLogger } from '../logger.js';
 
 export interface OpenCodeEvent {
   type: string;
@@ -16,6 +17,7 @@ export class SSEClient {
   private reconnectDelay = 5000;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isManualClose = false;
+  private logger = getLogger('sse');
 
   constructor(baseUrl: string, username?: string, password?: string) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -30,7 +32,7 @@ export class SSEClient {
 
   start(): void {
     if (this.eventSource) {
-      console.log('SSE already running');
+      this.logger.info('SSE already running');
       return;
     }
 
@@ -43,27 +45,27 @@ export class SSEClient {
 
     this.eventSource = new EventSource(url);
 
-    console.log('[octg][sse] connecting to /event');
+    this.logger.info('connecting to /event');
 
     this.eventSource.onopen = () => {
-      console.log('[octg][sse] connection opened');
+      this.logger.info('connection opened');
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
     };
 
-    this.eventSource.onmessage = (event) => {
+    this.eventSource.onmessage = (event: { data: string }) => {
       try {
         const data = JSON.parse(event.data);
         this.handleEvent(data);
       } catch (error) {
-        console.error('Failed to parse SSE message:', error);
+        this.logger.error('Failed to parse SSE message:', error);
       }
     };
 
-    this.eventSource.onerror = (error) => {
-      console.error('[octg][sse] error:', error);
+    this.eventSource.onerror = (error: unknown) => {
+      this.logger.error('error:', error);
 
       if (this.isManualClose) {
         return;
@@ -73,7 +75,7 @@ export class SSEClient {
       this.eventSource = null;
 
       this.reconnectTimer = setTimeout(() => {
-        console.log(`[octg][sse] reconnecting in ${this.reconnectDelay}ms`);
+        this.logger.info(`reconnecting in ${this.reconnectDelay}ms`);
         this.start();
       }, this.reconnectDelay);
     };
@@ -90,7 +92,7 @@ export class SSEClient {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
-      console.log('[octg][sse] connection closed');
+      this.logger.info('connection closed');
     }
   }
 
@@ -113,7 +115,7 @@ export class SSEClient {
 
   private handleEvent(event: OpenCodeEvent): void {
     if (event.type === 'session.permission.requested' || event.type === 'message.created') {
-      console.log(`[octg][sse] event ${event.type}`);
+      this.logger.debug(`event ${event.type}`);
     }
 
     const handlers = this.eventHandlers.get(event.type) || [];
@@ -123,7 +125,7 @@ export class SSEClient {
       try {
         handler(event);
       } catch (error) {
-        console.error('Event handler error:', error);
+        this.logger.error('Event handler error:', error);
       }
     }
   }

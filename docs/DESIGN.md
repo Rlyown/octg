@@ -748,7 +748,7 @@ networks:
 
 | 命令 | 描述 | 示例 |
 |------|------|------|
-| `/code <desc>` | 生成代码 | `/code 创建一个React组件` |
+| `/task <desc>` | 提交异步任务（耗时长、复杂需求） | `/task 创建一个React组件` |
 | `/edit <file> <desc>` | 编辑文件 | `/edit src/App.tsx 添加dark mode` |
 | `/review <file>` | 代码审查 | `/review src/utils.ts` |
 
@@ -869,7 +869,7 @@ export class HttpOpenCodeClient implements OpenCodeClient {
 - [ ] 文件操作 (`/ls`, `/cat`, `/tree`)
 - [ ] Shell 命令执行 (`/run`, `/git`)
 - [ ] Todo 管理 (`/todos`)
-- [ ] 代码生成 (`/code`)
+- [ ] 异步任务 (`/task`)
 
 ### Phase 3：Plugin 模式
 - [ ] Plugin 入口实现

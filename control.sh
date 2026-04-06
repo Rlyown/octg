@@ -22,15 +22,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="opencode-telegram"
 
-GLOBAL_CONFIG_DIR="${HOME}/.config/agent-toolkits"
-GLOBAL_ENV_FILE="${GLOBAL_CONFIG_DIR}/opencode-telegram.env"
+LEGACY_GLOBAL_ENV_FILE="${HOME}/.config/agent-toolkits/opencode-telegram.env"
 LOCAL_ENV_FILE="${SCRIPT_DIR}/.env"
 DEFAULT_OPENCODE_WORKDIR="${HOME}/GitProject"
 
 ENV_FILE="${LOCAL_ENV_FILE}"
-if [ -f "$GLOBAL_ENV_FILE" ]; then
-    ENV_FILE="$GLOBAL_ENV_FILE"
-fi
 
 # Colors
 RED='\033[0;31m'
@@ -95,200 +91,23 @@ get_opencode_workdir() {
     printf '%s\n' "$workdir"
 }
 
-setup_opencode_service() {
-    local opencode_path
-    local opencode_workdir
-    opencode_path=$(which opencode)
-    opencode_workdir="$(get_opencode_workdir)"
-    mkdir -p "$opencode_workdir"
-    
-    if is_macos; then
-        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
-        mkdir -p "${HOME}/Library/LaunchAgents"
-        cat > "$plist_path" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.opencode.server</string>
-    <key>WorkingDirectory</key>
-    <string>${opencode_workdir}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${opencode_path}</string>
-        <string>serve</string>
-        <string>--port</string>
-        <string>4096</string>
-        <string>--hostname</string>
-        <string>127.0.0.1</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
-        <key>OPENCODE_SERVER_PASSWORD</key>
-        <string>${OPENCODE_PASSWORD:-}</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${LOG_DIR}/opencode-server.log</string>
-    <key>StandardErrorPath</key>
-    <string>${LOG_DIR}/opencode-server.log</string>
-</dict>
-</plist>
-EOF
-        print_success "OpenCode server launchd service configured"
-    elif is_systemd_available; then
-        local service_path="${HOME}/.config/systemd/user/opencode-server.service"
-        mkdir -p "${HOME}/.config/systemd/user"
-        cat > "$service_path" << EOF
-[Unit]
-Description=OpenCode Server
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=${opencode_path} serve --port 4096 --hostname 127.0.0.1
-WorkingDirectory=${opencode_workdir}
-Restart=on-failure
-RestartSec=5
-Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_PASSWORD:-}
-
-[Install]
-WantedBy=default.target
-EOF
-        systemctl --user daemon-reload
-        print_success "OpenCode server systemd service configured"
-    fi
-}
-
-start_opencode_service() {
-    if is_macos; then
-        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
-        if [ ! -f "$plist_path" ]; then
-            setup_opencode_service
-        fi
-        launchctl unload "$plist_path" 2>/dev/null || true
-        if launchctl load "$plist_path" 2>/dev/null; then
-            print_success "OpenCode server service loaded"
-        else
-            launchctl bootstrap user/$(id -u) "$plist_path" 2>/dev/null || {
-                print_error "Failed to load OpenCode server service"
-                return 1
-            }
-        fi
-    elif is_systemd_available; then
-        local service_path="${HOME}/.config/systemd/user/opencode-server.service"
-        if [ ! -f "$service_path" ]; then
-            setup_opencode_service
-        fi
-        systemctl --user enable opencode-server 2>/dev/null || true
-        systemctl --user start opencode-server
-        print_success "OpenCode server service started"
-    else
-        local opencode_path
-        local opencode_workdir
-        opencode_path=$(which opencode)
-        opencode_workdir="$(get_opencode_workdir)"
-        mkdir -p "$opencode_workdir"
-        (
-            cd "$opencode_workdir" || exit 1
-            OPENCODE_SERVER_PASSWORD="${OPENCODE_PASSWORD:-}" nohup "$opencode_path" serve --port 4096 --hostname 127.0.0.1 > "${LOG_DIR}/opencode-server.log" 2>&1 &
-            echo $! > "${LOG_DIR}/opencode-server.pid"
-        )
-        print_success "OpenCode server started (nohup)"
-    fi
-}
-
-stop_opencode_service() {
-    if is_macos; then
-        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
-        if launchctl list | grep -q "com.opencode.server"; then
-            launchctl stop com.opencode.server 2>/dev/null || true
-            launchctl unload "$plist_path" 2>/dev/null || true
-            print_success "OpenCode server service stopped"
-        fi
-    elif is_systemd_available; then
-        if systemctl --user is-active opencode-server > /dev/null 2>&1; then
-            systemctl --user stop opencode-server
-            print_success "OpenCode server service stopped"
-        fi
-    else
-        if [ -f "${LOG_DIR}/opencode-server.pid" ]; then
-            local pid
-            pid=$(cat "${LOG_DIR}/opencode-server.pid" 2>/dev/null)
-            if kill -0 "$pid" 2>/dev/null; then
-                kill "$pid" 2>/dev/null || true
-                print_success "OpenCode server stopped"
-            fi
-            rm -f "${LOG_DIR}/opencode-server.pid"
-        fi
-    fi
-    pkill -f "opencode serve" 2>/dev/null || true
-}
-
-
-
-check_and_start_opencode() {
-    local auto_start="${1:-false}"
-    
+check_opencode_server() {
     print_info "Checking OpenCode server..."
-    
-    if curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        local health
+    if [ -n "${OPENCODE_PASSWORD:-}" ] && curl -sf -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health" > /dev/null 2>&1; then
+        local health version
         health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        local version
         version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
         print_success "OpenCode server running (v${version})"
         return 0
-    elif curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        local health
+    elif curl -sf "${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health" > /dev/null 2>&1; then
+        local health version
         health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        local version
         version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version}, no password)"
+        print_success "OpenCode server running (v${version})"
         return 0
-    fi
-    
-    if [ "$auto_start" = "true" ]; then
-        print_warning "OpenCode server not running at ${OPENCODE_SERVER_URL}"
-        print_info "Starting OpenCode server automatically..."
-        
-        if ! command -v opencode &> /dev/null; then
-            print_error "opencode command not found"
-            print_info "Please install OpenCode: https://opencode.ai"
-            return 1
-        fi
-        
-        start_opencode_service
-        
-        print_info "Waiting for OpenCode server..."
-        local max_wait=30
-        local waited=0
-        while [ $waited -lt $max_wait ]; do
-            if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-                local health
-                health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-                local version
-                version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-                print_success "OpenCode server ready (v${version})"
-                return 0
-            fi
-            sleep 1
-            ((waited++))
-        done
-        
-        if ! curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-            print_error "Failed to start OpenCode server"
-            return 1
-        fi
     else
-        print_error "Cannot connect to OpenCode server at ${OPENCODE_SERVER_URL}"
-        print_info "Please ensure opencode serve is running"
+        print_error "Cannot connect to OpenCode server at ${OPENCODE_SERVER_URL:-http://localhost:4096}"
+        print_info "Please start it manually: opencode serve --port 4096 --hostname 127.0.0.1"
         return 1
     fi
 }
@@ -323,14 +142,12 @@ cmd_start() {
         fi
     fi
     
-    # Check if compiled
-    if [ ! -f "${SCRIPT_DIR}/dist/standalone.js" ]; then
-        print_warning "Compiled code not found, building..."
-        cd "$SCRIPT_DIR" && npm run build
-    fi
-    
-    check_and_start_opencode true || exit 1
-    
+    # Build
+    print_info "Building..."
+    cd "$SCRIPT_DIR" && npm run build || { print_error "Build failed"; exit 1; }
+
+    check_opencode_server || exit 1
+
     print_info "Starting in background mode..."
     
     if is_macos; then
@@ -363,14 +180,34 @@ cmd_start() {
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
         <key>TELEGRAM_BOT_TOKEN</key>
         <string>${TELEGRAM_BOT_TOKEN:-}</string>
+        <key>TELEGRAM_MODE</key>
+        <string>${TELEGRAM_MODE:-polling}</string>
+        <key>TELEGRAM_WEBHOOK_URL</key>
+        <string>${TELEGRAM_WEBHOOK_URL:-}</string>
+        <key>TELEGRAM_WEBHOOK_PORT</key>
+        <string>${TELEGRAM_WEBHOOK_PORT:-3000}</string>
+        <key>TELEGRAM_ALLOWED_USER_IDS</key>
+        <string>${TELEGRAM_ALLOWED_USER_IDS:-}</string>
         <key>OPENCODE_PASSWORD</key>
         <string>${OPENCODE_PASSWORD:-}</string>
         <key>OPENCODE_SERVER_URL</key>
         <string>${OPENCODE_SERVER_URL:-http://localhost:4096}</string>
+        <key>OPENCODE_USERNAME</key>
+        <string>${OPENCODE_USERNAME:-opencode}</string>
+        <key>OPENCODE_REQUEST_TIMEOUT</key>
+        <string>${OPENCODE_REQUEST_TIMEOUT:-60000}</string>
         <key>WHITELIST_FILE</key>
-        <string>${WHITELIST_FILE:-${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json}</string>
+        <string>${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}</string>
         <key>PAIRING_CODE_TTL</key>
         <string>${PAIRING_CODE_TTL:-2}</string>
+        <key>LOG_LEVEL</key>
+        <string>${LOG_LEVEL:-info}</string>
+        <key>MAX_MESSAGE_LENGTH</key>
+        <string>${MAX_MESSAGE_LENGTH:-4000}</string>
+        <key>CODE_BLOCK_TIMEOUT</key>
+        <string>${CODE_BLOCK_TIMEOUT:-120000}</string>
+        <key>ENABLE_SSE</key>
+        <string>${ENABLE_SSE:-true}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -436,10 +273,20 @@ ExecStart=/usr/bin/env node ${SCRIPT_DIR}/dist/standalone.js
 Restart=on-failure
 RestartSec=5
 Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+Environment=TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
+Environment=TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
+Environment=TELEGRAM_WEBHOOK_PORT=${TELEGRAM_WEBHOOK_PORT:-3000}
+Environment=TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
 Environment=OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
 Environment=OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
-Environment=WHITELIST_FILE=${WHITELIST_FILE:-${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json}
+Environment=OPENCODE_USERNAME=${OPENCODE_USERNAME:-opencode}
+Environment=OPENCODE_REQUEST_TIMEOUT=${OPENCODE_REQUEST_TIMEOUT:-60000}
+Environment=WHITELIST_FILE=${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}
 Environment=PAIRING_CODE_TTL=${PAIRING_CODE_TTL:-2}
+Environment=LOG_LEVEL=${LOG_LEVEL:-info}
+Environment=MAX_MESSAGE_LENGTH=${MAX_MESSAGE_LENGTH:-4000}
+Environment=CODE_BLOCK_TIMEOUT=${CODE_BLOCK_TIMEOUT:-120000}
+Environment=ENABLE_SSE=${ENABLE_SSE:-true}
 
 [Install]
 WantedBy=default.target
@@ -485,9 +332,13 @@ check_env_file() {
     if [ ! -f "$ENV_FILE" ]; then
         print_error "Configuration not found!"
         echo ""
-        echo "Searched locations:"
-        echo "  - $GLOBAL_ENV_FILE"
+        echo "Expected location:"
         echo "  - $LOCAL_ENV_FILE"
+        if [ -f "$LEGACY_GLOBAL_ENV_FILE" ]; then
+            echo ""
+            print_warning "Detected deprecated legacy config: $LEGACY_GLOBAL_ENV_FILE"
+            print_info "Please migrate it to: $LOCAL_ENV_FILE"
+        fi
         echo ""
         print_info "Run '$(get_cmd_prefix) setup' first to configure"
         exit 1
@@ -496,7 +347,10 @@ check_env_file() {
 
 load_env() {
     if [ -f "$ENV_FILE" ]; then
-        export $(grep -v '^#' "$ENV_FILE" | xargs)
+        set -a
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+        set +a
     fi
 
     if [ -z "${WORKSPACE_PATH:-}" ]; then
@@ -511,55 +365,21 @@ cmd_setup() {
     local cmd_prefix
     cmd_prefix="$(get_cmd_prefix)"
     
-    local setup_target="global"
-    local target_env_file="$GLOBAL_ENV_FILE"
-    
-    if [ -f "$GLOBAL_ENV_FILE" ]; then
-        print_warning "Global config found: $GLOBAL_ENV_FILE"
-        read -p "Overwrite global config? (y/N): " overwrite
-        if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
-            print_info "Setup cancelled"
-            exit 0
-        fi
-        setup_target="global"
-        target_env_file="$GLOBAL_ENV_FILE"
-    elif [ -f "$LOCAL_ENV_FILE" ]; then
+    local target_env_file="$LOCAL_ENV_FILE"
+
+    if [ -f "$LOCAL_ENV_FILE" ]; then
         print_warning "Local config found: $LOCAL_ENV_FILE"
-        echo ""
-        echo "Choose configuration location:"
-        echo "  1. Global config (~/.config/agent-toolkits/) - RECOMMENDED, persists across reinstalls"
-        echo "  2. Local config (plugin directory) - tied to this installation"
-        read -p "Select (1/2, default: 1): " location_choice
-        
-        if [[ "$location_choice" == "2" ]]; then
-            setup_target="local"
-            target_env_file="$LOCAL_ENV_FILE"
-        else
-            setup_target="global"
-            target_env_file="$GLOBAL_ENV_FILE"
-        fi
-        
         read -p "Overwrite existing config? (y/N): " overwrite
         if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
             print_info "Setup cancelled"
             exit 0
         fi
-    else
-        echo "Choose configuration location:"
-        echo "  1. Global config (~/.config/agent-toolkits/) - RECOMMENDED, persists across reinstalls"
-        echo "  2. Local config (plugin directory) - tied to this installation"
-        read -p "Select (1/2, default: 1): " location_choice
-        
-        if [[ "$location_choice" == "2" ]]; then
-            setup_target="local"
-            target_env_file="$LOCAL_ENV_FILE"
-        else
-            setup_target="global"
-            target_env_file="$GLOBAL_ENV_FILE"
-        fi
+    elif [ -f "$LEGACY_GLOBAL_ENV_FILE" ]; then
+        print_warning "Detected deprecated legacy config: $LEGACY_GLOBAL_ENV_FILE"
+        print_info "Setup will now write to local .env: $LOCAL_ENV_FILE"
     fi
     
-    print_info "Configuring OpenCode Telegram Plugin ($setup_target mode)"
+    print_info "Configuring OpenCode Telegram Plugin (local .env mode)"
     echo ""
     
     # Telegram Bot Token
@@ -589,31 +409,15 @@ TELEGRAM_MODE=polling
 OPENCODE_SERVER_URL=http://localhost:4096
 OPENCODE_USERNAME=opencode
 OPENCODE_PASSWORD=$opencode_password
-WORKSPACE_PATH=$DEFAULT_OPENCODE_WORKDIR
-
-# Session Configuration
-SESSION_STORAGE=file
-EOF
-
-    if [[ "$setup_target" == "global" ]]; then
-        echo "SESSION_FILE_PATH=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/sessions.json" >> "$target_env_file"
-        echo "WHITELIST_FILE=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json" >> "$target_env_file"
-        echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
-    else
-        echo "SESSION_FILE_PATH=${SCRIPT_DIR}/data/sessions.json" >> "$target_env_file"
-        echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
-        echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
-    fi
-    
-    cat >> "$target_env_file" << EOF
-SESSION_TTL=86400
-
 
 # Application Configuration
 LOG_LEVEL=info
 MAX_MESSAGE_LENGTH=4000
 CODE_BLOCK_TIMEOUT=120000
 EOF
+
+    echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
+    echo "PAIRING_CODE_TTL=2" >> "$target_env_file" 
     
     echo ""
     print_success "Configuration saved to: $target_env_file"
@@ -621,19 +425,12 @@ EOF
     # Create directories
     mkdir -p "${SCRIPT_DIR}/data"
     mkdir -p "${SCRIPT_DIR}/shared"
-    mkdir -p "$WORKSPACE_PATH"
     
     print_success "Directories created"
     
     echo ""
     echo -e "${GREEN}Setup complete!${NC}"
     echo ""
-    
-    if [[ "$setup_target" == "global" ]]; then
-        echo "Configuration stored in: ~/.config/agent-toolkits/opencode-telegram.env"
-        echo "This will persist across plugin reinstalls."
-        echo ""
-    fi
     
     echo "Next steps:"
     echo "  ${cmd_prefix} host    - Run locally (requires opencode serve)"
@@ -647,9 +444,13 @@ cmd_host() {
     if [ ! -f "$ENV_FILE" ]; then
         print_error "Configuration not found!"
         echo ""
-        echo "Searched locations:"
-        echo "  - $GLOBAL_ENV_FILE"
+        echo "Expected location:"
         echo "  - $LOCAL_ENV_FILE"
+        if [ -f "$LEGACY_GLOBAL_ENV_FILE" ]; then
+            echo ""
+            print_warning "Detected deprecated legacy config: $LEGACY_GLOBAL_ENV_FILE"
+            print_info "Please migrate it to: $LOCAL_ENV_FILE"
+        fi
         echo ""
         print_info "The Telegram Plugin needs configuration before starting."
         echo ""
@@ -668,14 +469,12 @@ cmd_host() {
     print_info "Starting in HOST mode..."
     echo ""
     
-    # Check if compiled
-    if [ ! -f "${SCRIPT_DIR}/dist/standalone.js" ]; then
-        print_warning "Compiled code not found, building..."
-        cd "$SCRIPT_DIR" && npm run build
-    fi
-    
-    check_and_start_opencode true || exit 1
-    
+    # Build
+    print_info "Building..."
+    cd "$SCRIPT_DIR" && npm run build || { print_error "Build failed"; exit 1; }
+
+    check_opencode_server || exit 1
+
     echo ""
     print_info "Starting Telegram Bot..."
     echo "Press Ctrl+C to stop"
@@ -768,68 +567,9 @@ cmd_status() {
     fi
     
     echo ""
-    
-    echo -e "${CYAN}OpenCode Server Service${NC}"
-    echo "------------------------------"
-    local opencode_service_running=false
-    if is_macos; then
-        if launchctl list | grep -q "com.opencode.server"; then
-            print_success "OpenCode server service: Loaded (launchd)"
-            opencode_service_running=true
-        else
-            print_info "OpenCode server service: Not loaded"
-        fi
-    elif is_systemd_available; then
-        if systemctl --user is-active opencode-server > /dev/null 2>&1; then
-            print_success "OpenCode server service: Active (systemd)"
-            opencode_service_running=true
-        else
-            print_info "OpenCode server service: Inactive"
-        fi
-    else
-        if [ -f "${LOG_DIR}/opencode-server.pid" ]; then
-            local opencode_pid
-            opencode_pid=$(cat "${LOG_DIR}/opencode-server.pid" 2>/dev/null)
-            if kill -0 "$opencode_pid" 2>/dev/null; then
-                print_success "OpenCode server: Running (PID: $opencode_pid)"
-                opencode_service_running=true
-            else
-                print_info "OpenCode server: Not running"
-                rm -f "${LOG_DIR}/opencode-server.pid"
-            fi
-        else
-            print_info "OpenCode server: Not running"
-        fi
-    fi
-    
-    echo ""
-    
-    print_info "Checking OpenCode server..."
-    
+
     load_env 2>/dev/null || true
-    if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        # No password required
-        OPENCODE_AUTH=""
-        health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version}, no password)"
-    elif curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        # Password required and correct
-        OPENCODE_AUTH="-u opencode:${OPENCODE_PASSWORD}"
-        health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version}, password protected)"
-    elif [ -n "${OPENCODE_PASSWORD}" ]; then
-        # Password provided but auth failed
-        print_error "OpenCode server authentication failed"
-        print_info "Check OPENCODE_PASSWORD in .env"
-        exit 1
-    else
-        # No password provided and auth required
-        print_warning "OpenCode server requires password"
-        print_info "Add OPENCODE_PASSWORD to .env file"
-        exit 1
-    fi
+    check_opencode_server
     
     echo ""
     echo -e "${CYAN}Quick Actions${NC}"
@@ -873,7 +613,7 @@ cmd_stop() {
         fi
         rm -f "$pid_file"
     fi
-    
+
     # Stop foreground mode
     if pgrep -f "node.*standalone.js" > /dev/null; then
         pkill -f "node.*standalone.js"
@@ -881,8 +621,6 @@ cmd_stop() {
         stopped=true
     fi
     
-    stop_opencode_service
-    stopped=true
     
     if [ "$stopped" = false ]; then
         print_info "No running processes found"

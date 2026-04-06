@@ -22,15 +22,6 @@ export interface OpencodeConfig {
 }
 
 /**
- * Session configuration
- */
-export interface SessionConfig {
-  storage: 'memory' | 'file';
-  filePath?: string;
-  ttl: number;
-}
-
-/**
  * App configuration
  */
 export interface AppConfig {
@@ -48,7 +39,6 @@ export interface AppConfig {
 export interface PluginConfig {
   telegram: TelegramConfig;
   opencode: OpencodeConfig;
-  session: SessionConfig;
   app: AppConfig;
 }
 
@@ -58,8 +48,8 @@ export interface PluginConfig {
 export interface OpenCodeSession {
   id: string;
   title?: string;
-  createdAt: string;
-  updatedAt: string;
+  directory?: string;
+  time: { created: number; updated: number };
 }
 
 /**
@@ -137,16 +127,13 @@ export interface ShellResult {
 }
 
 /**
- * Telegram User Session
+ * Current session state (single active session per octg instance)
  */
 export interface TelegramSession {
-  telegramUserId: string;
   telegramChatId: string;
   openCodeSessionId: string;
   openCodeSessionTitle?: string;
-  username?: string;
-  firstName?: string;
-  lastName?: string;
+  directory?: string;
   preferredModel?: string;
   preferredAgent?: string;
   createdAt: Date;
@@ -254,11 +241,6 @@ export const configSchema = {
     username: { type: 'string', default: 'opencode' },
     password: { type: 'string' },
     requestTimeout: { type: 'number', default: 60000 },
-  },
-  session: {
-    storage: { type: 'string', enum: ['memory', 'file'], default: 'memory' },
-    filePath: { type: 'string', default: './data/sessions.json' },
-    ttl: { type: 'number', default: 86400 }, // 24 hours
   },
   app: {
     logLevel: { type: 'string', enum: ['debug', 'info', 'warn', 'error'], default: 'info' },

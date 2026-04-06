@@ -88,7 +88,7 @@ export function formatSessionOverview(params: {
 }): string {
   if (params.sessions.length === 0) {
     const scope = params.query ? `与 "${params.query}" 相关的 ` : '';
-    return `📭 没有可用的${scope}Sessions\n\n使用 /new 创建新 session`;
+    return `📭 没有可用的${scope}Sessions\n\n使用 /new <绝对路径> 创建新 session`;
   }
 
   const pageSize = params.pageSize ?? 8;
@@ -112,7 +112,7 @@ export function formatSessionOverview(params: {
     const isCurrent = session.id === params.currentSessionId ? ' 👈' : '';
     const title = session.title || 'Untitled';
     const shortId = `${session.id.slice(0, 12)}...`;
-    const date = session.updatedAt ? new Date(session.updatedAt).toLocaleDateString() : 'Unknown';
+    const date = session.time?.updated ? new Date(session.time.updated).toLocaleDateString() : 'Unknown';
     return `${startIndex + index + 1}. ${shortId}${isCurrent}\n   ${title}\n   ${date}`;
   });
 
@@ -126,9 +126,10 @@ export function formatSessionOverview(params: {
     '用法：',
     '• /sessions <序号> 按列表序号载入 session',
     '• /sessions <id或前缀> 载入已有 session',
+    '• /remove <序号或id> 删除 session',
     '• /sessions <关键词> 检索 session',
     '• 用下方按钮翻页',
-    '• /new [title] 创建新 session',
+    '• /new <绝对路径> [title] 创建新 session',
   ].join('\n');
 }
 

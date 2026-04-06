@@ -98,7 +98,7 @@ export class PermissionHandler {
       this.pendingPermissions.set(event.permissionID, {
         sessionId: event.sessionID,
         permissionId: event.permissionID,
-        userId: session.telegramUserId,
+        userId: session.telegramChatId,
         chatId: session.telegramChatId,
         description,
         messageId: message.message_id,
@@ -106,7 +106,7 @@ export class PermissionHandler {
       });
 
       this.logger.info(
-        `delivered permission=${this.shortId(event.permissionID)} to user=${session.telegramUserId}`
+        `delivered permission=${this.shortId(event.permissionID)} session=${this.shortId(event.sessionID)}`
       );
     } catch (error) {
       this.logger.error('Failed to send permission request:', error);
@@ -176,9 +176,9 @@ export class PermissionHandler {
     });
   }
 
-  private async getSession(sessionId: string): Promise<TelegramSession | null> {
-    const allSessions = await this.sessions.getAll();
-    return allSessions.find((s: TelegramSession) => s.openCodeSessionId === sessionId) || null;
+  private getSession(sessionId: string): TelegramSession | null {
+    const s = this.sessions.get();
+    return s?.openCodeSessionId === sessionId ? s : null;
   }
 
   private cleanupExpiredPermissions(): void {

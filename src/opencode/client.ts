@@ -22,6 +22,10 @@ interface ClientConfig {
   timeout: number;
 }
 
+interface SessionRequestOptions {
+  directory?: string;
+}
+
 export class OpenCodeClient {
   private config: ClientConfig;
   private logger = getLogger('opencode');
@@ -49,6 +53,15 @@ export class OpenCodeClient {
     }
 
     return path;
+  }
+
+  private withDirectory(path: string, directory?: string): string {
+    if (!directory) {
+      return path;
+    }
+
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}directory=${encodeURIComponent(directory)}`;
   }
 
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -84,7 +97,7 @@ export class OpenCodeClient {
 
       if (logRequest) {
         this.logger.debug(
-           `${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
+          `${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
         );
       }
 
@@ -93,7 +106,16 @@ export class OpenCodeClient {
         throw new Error(`HTTP ${response.status}: ${text}`);
       }
 
-      return (await response.json()) as T;
+      if (response.status === 204) {
+        return undefined as T;
+      }
+
+      const raw = await response.text();
+      if (!raw.trim()) {
+        return undefined as T;
+      }
+
+      return JSON.parse(raw) as T;
     } catch (error) {
       clearTimeout(timeoutId);
 
@@ -125,10 +147,10 @@ export class OpenCodeClient {
     return this.request('/session');
   }
 
-  async createSession(title?: string): Promise<OpenCodeSession> {
-    return this.request('/session', {
+  async createSession(input: { title?: string; directory?: string } = {}): Promise<OpenCodeSession> {
+    return this.request(this.withDirectory('/session', input.directory), {
       method: 'POST',
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title: input.title }),
     });
   }
 
@@ -140,16 +162,32 @@ export class OpenCodeClient {
     await this.request(`/session/${id}`, { method: 'DELETE' });
   }
 
-  async sendMessage(sessionId: string, text: string): Promise<MessageResponse> {
-    return this.sendMessageWithOverrides(sessionId, text);
+  async sendMessage(sessionId: string, text: string, options: SessionRequestOptions = {}): Promise<MessageResponse> {
+    return this.sendMessageWithOverrides(sessionId, text, {}, options);
   }
 
   async sendMessageWithOverrides(
     sessionId: string,
     text: string,
-    overrides: RequestOverrides = {}
+    overrides: RequestOverrides = {},
+    options: SessionRequestOptions = {}
   ): Promise<MessageResponse> {
-    return this.request(`/session/${sessionId}/message`, {
+    return this.request(this.withDirectory(`/session/${sessionId}/message`, options.directory), {
+      method: 'POST',
+      body: JSON.stringify({
+        ...overrides,
+        parts: [{ type: 'text', text }],
+      }),
+    });
+  }
+
+  async sendMessageAsyncWithOverrides(
+    sessionId: string,
+    text: string,
+    overrides: RequestOverrides = {},
+    options: SessionRequestOptions = {}
+  ): Promise<void> {
+    await this.request(this.withDirectory(`/session/${sessionId}/prompt_async`, options.directory), {
       method: 'POST',
       body: JSON.stringify({
         ...overrides,
@@ -161,9 +199,10 @@ export class OpenCodeClient {
   async executeShell(
     sessionId: string,
     command: string,
-    overrides: RequestOverrides = {}
+    overrides: RequestOverrides = {},
+    options: SessionRequestOptions = {}
   ): Promise<ShellResult> {
-    return this.request(`/session/${sessionId}/shell`, {
+    return this.request(this.withDirectory(`/session/${sessionId}/shell`, options.directory), {
       method: 'POST',
       body: JSON.stringify({
         ...overrides,
@@ -172,25 +211,25 @@ export class OpenCodeClient {
     });
   }
 
-  async getTodos(sessionId: string): Promise<Todo[]> {
-    return this.request(`/session/${sessionId}/todo`);
+  async getTodos(sessionId: string, options: SessionRequestOptions = {}): Promise<Todo[]> {
+    return this.request(this.withDirectory(`/session/${sessionId}/todo`, options.directory));
   }
 
-  async listFiles(path: string = ''): Promise<FileNode[]> {
+  async listFiles(path: string = '', options: SessionRequestOptions = {}): Promise<FileNode[]> {
     const query = path ? `?path=${encodeURIComponent(path)}` : '';
-    return this.request(`/file${query}`);
+    return this.request(this.withDirectory(`/file${query}`, options.directory));
   }
 
-  async readFile(path: string): Promise<FileContent> {
-    return this.request(`/file/content?path=${encodeURIComponent(path)}`);
+  async readFile(path: string, options: SessionRequestOptions = {}): Promise<FileContent> {
+    return this.request(this.withDirectory(`/file/content?path=${encodeURIComponent(path)}`, options.directory));
   }
 
   async getProject(): Promise<unknown> {
     return this.request('/project/current');
   }
 
-  async getPath(): Promise<unknown> {
-    return this.request('/path');
+  async getPath(options: SessionRequestOptions = {}): Promise<unknown> {
+    return this.request(this.withDirectory('/path', options.directory));
   }
 
   async listAgents(): Promise<Agent[]> {
@@ -201,17 +240,17 @@ export class OpenCodeClient {
     return this.request('/config/providers');
   }
 
-  async findText(pattern: string): Promise<SearchResult[]> {
-    return this.request(`/find?pattern=${encodeURIComponent(pattern)}`);
+  async findText(pattern: string, options: SessionRequestOptions = {}): Promise<SearchResult[]> {
+    return this.request(this.withDirectory(`/find?pattern=${encodeURIComponent(pattern)}`, options.directory));
   }
 
-  async findFile(query: string): Promise<string[]> {
-    return this.request(`/find/file?query=${encodeURIComponent(query)}`);
+  async findFile(query: string, options: SessionRequestOptions = {}): Promise<string[]> {
+    return this.request(this.withDirectory(`/find/file?query=${encodeURIComponent(query)}`, options.directory));
   }
 
-  async getSessionDiff(sessionId: string, messageId?: string): Promise<SessionDiff[]> {
+  async getSessionDiff(sessionId: string, messageId?: string, options: SessionRequestOptions = {}): Promise<SessionDiff[]> {
     const query = messageId ? `?messageID=${encodeURIComponent(messageId)}` : '';
-    return this.request(`/session/${sessionId}/diff${query}`);
+    return this.request(this.withDirectory(`/session/${sessionId}/diff${query}`, options.directory));
   }
 
   async updateSession(sessionId: string, title: string): Promise<OpenCodeSession> {
@@ -221,15 +260,15 @@ export class OpenCodeClient {
     });
   }
 
-  async forkSession(sessionId: string, messageId?: string): Promise<OpenCodeSession> {
-    return this.request(`/session/${sessionId}/fork`, {
+  async forkSession(sessionId: string, messageId?: string, options: SessionRequestOptions = {}): Promise<OpenCodeSession> {
+    return this.request(this.withDirectory(`/session/${sessionId}/fork`, options.directory), {
       method: 'POST',
       body: JSON.stringify(messageId ? { messageID: messageId } : {}),
     });
   }
 
-  async abortSession(sessionId: string): Promise<boolean> {
-    return this.request(`/session/${sessionId}/abort`, { method: 'POST' });
+  async abortSession(sessionId: string, options: SessionRequestOptions = {}): Promise<boolean> {
+    return this.request(this.withDirectory(`/session/${sessionId}/abort`, options.directory), { method: 'POST' });
   }
 
   async shareSession(sessionId: string): Promise<OpenCodeSession> {
@@ -240,16 +279,21 @@ export class OpenCodeClient {
     return this.request(`/session/${sessionId}/share`, { method: 'DELETE' });
   }
 
-  async summarizeSession(sessionId: string, providerId?: string, modelId?: string): Promise<boolean> {
-    return this.request(`/session/${sessionId}/summarize`, {
+  async summarizeSession(
+    sessionId: string,
+    providerId?: string,
+    modelId?: string,
+    options: SessionRequestOptions = {}
+  ): Promise<boolean> {
+    return this.request(this.withDirectory(`/session/${sessionId}/summarize`, options.directory), {
       method: 'POST',
       body: JSON.stringify({ providerID: providerId, modelID: modelId }),
     });
   }
 
-  async listMessages(sessionId: string, limit?: number): Promise<MessageDetail[]> {
+  async listMessages(sessionId: string, limit?: number, options: SessionRequestOptions = {}): Promise<MessageDetail[]> {
     const query = limit ? `?limit=${limit}` : '';
-    return this.request(`/session/${sessionId}/message${query}`);
+    return this.request(this.withDirectory(`/session/${sessionId}/message${query}`, options.directory));
   }
 
   async getMessage(sessionId: string, messageId: string): Promise<MessageDetail> {
@@ -291,19 +335,24 @@ export class OpenCodeClient {
     return this.request(`/session/${sessionId}/children`);
   }
 
-  async initSession(sessionId: string, providerId?: string, modelId?: string): Promise<boolean> {
-    return this.request(`/session/${sessionId}/init`, {
+  async initSession(
+    sessionId: string,
+    providerId?: string,
+    modelId?: string,
+    options: SessionRequestOptions = {}
+  ): Promise<boolean> {
+    return this.request(this.withDirectory(`/session/${sessionId}/init`, options.directory), {
       method: 'POST',
       body: JSON.stringify({ providerID: providerId, modelID: modelId }),
     });
   }
 
-  async findSymbol(query: string): Promise<unknown[]> {
-    return this.request(`/find/symbol?query=${encodeURIComponent(query)}`);
+  async findSymbol(query: string, options: SessionRequestOptions = {}): Promise<unknown[]> {
+    return this.request(this.withDirectory(`/find/symbol?query=${encodeURIComponent(query)}`, options.directory));
   }
 
-  async getFileStatus(): Promise<unknown[]> {
-    return this.request('/file/status');
+  async getFileStatus(options: SessionRequestOptions = {}): Promise<unknown[]> {
+    return this.request(this.withDirectory('/file/status', options.directory));
   }
 
   async listToolIds(): Promise<unknown> {

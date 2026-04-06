@@ -6,6 +6,7 @@ import type { PluginConfig, TelegramSession } from '../../types.js';
 import { WhitelistManager } from '../../auth/whitelist.js';
 import { SSEClient } from '../../opencode/oc-event.js';
 import { PermissionHandler } from '../../opencode/permission-handler.js';
+import { formatCodeResponse } from '../formatters.js';
 import { TaskHandler } from './task.js';
 import { FileHandler } from './file.js';
 import { GeneralHandler } from './general.js';
@@ -333,7 +334,6 @@ export class BotHandlers {
     }
     if (!session.telegramChatId) {
       session.telegramChatId = ctx.chat?.id.toString() || '';
-      await ctx.reply(`📎 已关联到当前 session\n\n🪪 ${this.shortId(session.openCodeSessionId)}\n🏷️ ${session.openCodeSessionTitle || 'Untitled'}`);
     }
     this.sessions.updateActivity();
 
@@ -364,15 +364,16 @@ export class BotHandlers {
       await ctx.deleteMessage(processingMsg.message_id);
 
       const text = response.parts.map(p => p.text).join('\n');
+      const formatted = formatCodeResponse(text);
 
       const maxLength = this.config.app.maxMessageLength;
-      if (text.length > maxLength) {
-        for (let i = 0; i < text.length; i += maxLength) {
-          const chunk = text.slice(i, i + maxLength);
-          await ctx.reply(chunk);
+      if (formatted.length > maxLength) {
+        for (let i = 0; i < formatted.length; i += maxLength) {
+          const chunk = formatted.slice(i, i + maxLength);
+          await ctx.reply(chunk, { parse_mode: 'Markdown' }).catch(() => ctx.reply(chunk));
         }
       } else {
-        await ctx.reply(text);
+        await ctx.reply(formatted, { parse_mode: 'Markdown' }).catch(() => ctx.reply(text));
       }
     } catch (error) {
       const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);

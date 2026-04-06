@@ -22,15 +22,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="opencode-telegram"
 
-GLOBAL_CONFIG_DIR="${HOME}/.config/agent-toolkits"
-GLOBAL_ENV_FILE="${GLOBAL_CONFIG_DIR}/opencode-telegram.env"
+LEGACY_GLOBAL_ENV_FILE="${HOME}/.config/agent-toolkits/opencode-telegram.env"
 LOCAL_ENV_FILE="${SCRIPT_DIR}/.env"
 DEFAULT_OPENCODE_WORKDIR="${HOME}/GitProject"
 
 ENV_FILE="${LOCAL_ENV_FILE}"
-if [ -f "$GLOBAL_ENV_FILE" ]; then
-    ENV_FILE="$GLOBAL_ENV_FILE"
-fi
 
 # Colors
 RED='\033[0;31m'
@@ -184,14 +180,34 @@ cmd_start() {
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
         <key>TELEGRAM_BOT_TOKEN</key>
         <string>${TELEGRAM_BOT_TOKEN:-}</string>
+        <key>TELEGRAM_MODE</key>
+        <string>${TELEGRAM_MODE:-polling}</string>
+        <key>TELEGRAM_WEBHOOK_URL</key>
+        <string>${TELEGRAM_WEBHOOK_URL:-}</string>
+        <key>TELEGRAM_WEBHOOK_PORT</key>
+        <string>${TELEGRAM_WEBHOOK_PORT:-3000}</string>
+        <key>TELEGRAM_ALLOWED_USER_IDS</key>
+        <string>${TELEGRAM_ALLOWED_USER_IDS:-}</string>
         <key>OPENCODE_PASSWORD</key>
         <string>${OPENCODE_PASSWORD:-}</string>
         <key>OPENCODE_SERVER_URL</key>
         <string>${OPENCODE_SERVER_URL:-http://localhost:4096}</string>
+        <key>OPENCODE_USERNAME</key>
+        <string>${OPENCODE_USERNAME:-opencode}</string>
+        <key>OPENCODE_REQUEST_TIMEOUT</key>
+        <string>${OPENCODE_REQUEST_TIMEOUT:-60000}</string>
         <key>WHITELIST_FILE</key>
-        <string>${WHITELIST_FILE:-${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json}</string>
+        <string>${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}</string>
         <key>PAIRING_CODE_TTL</key>
         <string>${PAIRING_CODE_TTL:-2}</string>
+        <key>LOG_LEVEL</key>
+        <string>${LOG_LEVEL:-info}</string>
+        <key>MAX_MESSAGE_LENGTH</key>
+        <string>${MAX_MESSAGE_LENGTH:-4000}</string>
+        <key>CODE_BLOCK_TIMEOUT</key>
+        <string>${CODE_BLOCK_TIMEOUT:-120000}</string>
+        <key>ENABLE_SSE</key>
+        <string>${ENABLE_SSE:-true}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -257,10 +273,20 @@ ExecStart=/usr/bin/env node ${SCRIPT_DIR}/dist/standalone.js
 Restart=on-failure
 RestartSec=5
 Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+Environment=TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
+Environment=TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
+Environment=TELEGRAM_WEBHOOK_PORT=${TELEGRAM_WEBHOOK_PORT:-3000}
+Environment=TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
 Environment=OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
 Environment=OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
-Environment=WHITELIST_FILE=${WHITELIST_FILE:-${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json}
+Environment=OPENCODE_USERNAME=${OPENCODE_USERNAME:-opencode}
+Environment=OPENCODE_REQUEST_TIMEOUT=${OPENCODE_REQUEST_TIMEOUT:-60000}
+Environment=WHITELIST_FILE=${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}
 Environment=PAIRING_CODE_TTL=${PAIRING_CODE_TTL:-2}
+Environment=LOG_LEVEL=${LOG_LEVEL:-info}
+Environment=MAX_MESSAGE_LENGTH=${MAX_MESSAGE_LENGTH:-4000}
+Environment=CODE_BLOCK_TIMEOUT=${CODE_BLOCK_TIMEOUT:-120000}
+Environment=ENABLE_SSE=${ENABLE_SSE:-true}
 
 [Install]
 WantedBy=default.target
@@ -306,9 +332,13 @@ check_env_file() {
     if [ ! -f "$ENV_FILE" ]; then
         print_error "Configuration not found!"
         echo ""
-        echo "Searched locations:"
-        echo "  - $GLOBAL_ENV_FILE"
+        echo "Expected location:"
         echo "  - $LOCAL_ENV_FILE"
+        if [ -f "$LEGACY_GLOBAL_ENV_FILE" ]; then
+            echo ""
+            print_warning "Detected deprecated legacy config: $LEGACY_GLOBAL_ENV_FILE"
+            print_info "Please migrate it to: $LOCAL_ENV_FILE"
+        fi
         echo ""
         print_info "Run '$(get_cmd_prefix) setup' first to configure"
         exit 1
@@ -317,7 +347,10 @@ check_env_file() {
 
 load_env() {
     if [ -f "$ENV_FILE" ]; then
-        export $(grep -v '^#' "$ENV_FILE" | xargs)
+        set -a
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+        set +a
     fi
 
     if [ -z "${WORKSPACE_PATH:-}" ]; then
@@ -332,55 +365,21 @@ cmd_setup() {
     local cmd_prefix
     cmd_prefix="$(get_cmd_prefix)"
     
-    local setup_target="global"
-    local target_env_file="$GLOBAL_ENV_FILE"
-    
-    if [ -f "$GLOBAL_ENV_FILE" ]; then
-        print_warning "Global config found: $GLOBAL_ENV_FILE"
-        read -p "Overwrite global config? (y/N): " overwrite
-        if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
-            print_info "Setup cancelled"
-            exit 0
-        fi
-        setup_target="global"
-        target_env_file="$GLOBAL_ENV_FILE"
-    elif [ -f "$LOCAL_ENV_FILE" ]; then
+    local target_env_file="$LOCAL_ENV_FILE"
+
+    if [ -f "$LOCAL_ENV_FILE" ]; then
         print_warning "Local config found: $LOCAL_ENV_FILE"
-        echo ""
-        echo "Choose configuration location:"
-        echo "  1. Global config (~/.config/agent-toolkits/) - RECOMMENDED, persists across reinstalls"
-        echo "  2. Local config (plugin directory) - tied to this installation"
-        read -p "Select (1/2, default: 1): " location_choice
-        
-        if [[ "$location_choice" == "2" ]]; then
-            setup_target="local"
-            target_env_file="$LOCAL_ENV_FILE"
-        else
-            setup_target="global"
-            target_env_file="$GLOBAL_ENV_FILE"
-        fi
-        
         read -p "Overwrite existing config? (y/N): " overwrite
         if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
             print_info "Setup cancelled"
             exit 0
         fi
-    else
-        echo "Choose configuration location:"
-        echo "  1. Global config (~/.config/agent-toolkits/) - RECOMMENDED, persists across reinstalls"
-        echo "  2. Local config (plugin directory) - tied to this installation"
-        read -p "Select (1/2, default: 1): " location_choice
-        
-        if [[ "$location_choice" == "2" ]]; then
-            setup_target="local"
-            target_env_file="$LOCAL_ENV_FILE"
-        else
-            setup_target="global"
-            target_env_file="$GLOBAL_ENV_FILE"
-        fi
+    elif [ -f "$LEGACY_GLOBAL_ENV_FILE" ]; then
+        print_warning "Detected deprecated legacy config: $LEGACY_GLOBAL_ENV_FILE"
+        print_info "Setup will now write to local .env: $LOCAL_ENV_FILE"
     fi
     
-    print_info "Configuring OpenCode Telegram Plugin ($setup_target mode)"
+    print_info "Configuring OpenCode Telegram Plugin (local .env mode)"
     echo ""
     
     # Telegram Bot Token
@@ -417,11 +416,7 @@ MAX_MESSAGE_LENGTH=4000
 CODE_BLOCK_TIMEOUT=120000
 EOF
 
-    if [[ "$setup_target" == "global" ]]; then
-        echo "WHITELIST_FILE=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json" >> "$target_env_file"
-    else
-        echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
-    fi
+    echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
     echo "PAIRING_CODE_TTL=2" >> "$target_env_file" 
     
     echo ""
@@ -437,12 +432,6 @@ EOF
     echo -e "${GREEN}Setup complete!${NC}"
     echo ""
     
-    if [[ "$setup_target" == "global" ]]; then
-        echo "Configuration stored in: ~/.config/agent-toolkits/opencode-telegram.env"
-        echo "This will persist across plugin reinstalls."
-        echo ""
-    fi
-    
     echo "Next steps:"
     echo "  ${cmd_prefix} host    - Run locally (requires opencode serve)"
     echo ""
@@ -455,9 +444,13 @@ cmd_host() {
     if [ ! -f "$ENV_FILE" ]; then
         print_error "Configuration not found!"
         echo ""
-        echo "Searched locations:"
-        echo "  - $GLOBAL_ENV_FILE"
+        echo "Expected location:"
         echo "  - $LOCAL_ENV_FILE"
+        if [ -f "$LEGACY_GLOBAL_ENV_FILE" ]; then
+            echo ""
+            print_warning "Detected deprecated legacy config: $LEGACY_GLOBAL_ENV_FILE"
+            print_info "Please migrate it to: $LOCAL_ENV_FILE"
+        fi
         echo ""
         print_info "The Telegram Plugin needs configuration before starting."
         echo ""

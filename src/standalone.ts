@@ -13,7 +13,7 @@ const startupLogger = getLogger('startup');
 async function main() {
   // Load and validate configuration
   const config = loadConfig();
-  initLogger(config.app.logLevel);
+  initLogger(config.app.logLevel, config.app.logPath);
   const logger = bootstrapLogger;
 
   logger.info('🚀 Starting OpenCode Telegram Plugin...\n');

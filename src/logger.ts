@@ -1,3 +1,6 @@
+import { mkdirSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { inspect } from 'util';
 import winston from 'winston';
 import type { AppConfig } from './types.js';
@@ -9,6 +12,10 @@ interface LogInfo {
   message: unknown;
 }
 
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = path.resolve(MODULE_DIR, '..');
+const DEFAULT_LOG_FILE_PATH = path.join(APP_ROOT, 'logs', 'opencode-telegram.log');
+
 export interface AppLogger {
   debug: LogMethod;
   info: LogMethod;
@@ -17,6 +24,18 @@ export interface AppLogger {
 }
 
 let rootLogger: winston.Logger | null = null;
+
+function resolveLogFilePath(logPath?: string): string {
+  if (!logPath) {
+    return DEFAULT_LOG_FILE_PATH;
+  }
+
+  if (path.isAbsolute(logPath)) {
+    return logPath;
+  }
+
+  return path.resolve(APP_ROOT, logPath);
+}
 
 function formatLogArgs(args: unknown[]): string {
   return args.map(formatLogArg).join(' ');
@@ -77,21 +96,36 @@ function formatMessage(component: string | undefined, message: string): string {
   return `[octg][${component}] ${message}`;
 }
 
-export function initLogger(level: LogLevel): AppLogger {
+export function initLogger(level: LogLevel, logPath?: string): AppLogger {
   if (rootLogger) {
     rootLogger.level = level;
     return getLogger();
   }
 
-  rootLogger = winston.createLogger({
-    level,
-    format: winston.format.printf((info: LogInfo) => String(info.message)),
-    transports: [
+  const filePath = resolveLogFilePath(logPath);
+
+  mkdirSync(path.dirname(filePath), { recursive: true });
+
+  const transports: winston.transport[] = [
+    new winston.transports.File({
+      filename: filePath,
+      level,
+    }),
+  ];
+
+  if (process.stdout.isTTY) {
+    transports.push(
       new winston.transports.Console({
         stderrLevels: ['error'],
         consoleWarnLevels: ['warn'],
-      }),
-    ],
+      })
+    );
+  }
+
+  rootLogger = winston.createLogger({
+    level,
+    format: winston.format.printf((info: LogInfo) => String(info.message)),
+    transports,
   });
 
   return getLogger();

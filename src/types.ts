@@ -26,6 +26,7 @@ export interface OpencodeConfig {
  */
 export interface AppConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  logPath?: string;
   maxMessageLength: number;
   codeBlockTimeout: number;
   whitelistFile?: string;

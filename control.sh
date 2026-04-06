@@ -95,200 +95,23 @@ get_opencode_workdir() {
     printf '%s\n' "$workdir"
 }
 
-setup_opencode_service() {
-    local opencode_path
-    local opencode_workdir
-    opencode_path=$(which opencode)
-    opencode_workdir="$(get_opencode_workdir)"
-    mkdir -p "$opencode_workdir"
-    
-    if is_macos; then
-        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
-        mkdir -p "${HOME}/Library/LaunchAgents"
-        cat > "$plist_path" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.opencode.server</string>
-    <key>WorkingDirectory</key>
-    <string>${opencode_workdir}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${opencode_path}</string>
-        <string>serve</string>
-        <string>--port</string>
-        <string>4096</string>
-        <string>--hostname</string>
-        <string>127.0.0.1</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
-        <key>OPENCODE_SERVER_PASSWORD</key>
-        <string>${OPENCODE_PASSWORD:-}</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${LOG_DIR}/opencode-server.log</string>
-    <key>StandardErrorPath</key>
-    <string>${LOG_DIR}/opencode-server.log</string>
-</dict>
-</plist>
-EOF
-        print_success "OpenCode server launchd service configured"
-    elif is_systemd_available; then
-        local service_path="${HOME}/.config/systemd/user/opencode-server.service"
-        mkdir -p "${HOME}/.config/systemd/user"
-        cat > "$service_path" << EOF
-[Unit]
-Description=OpenCode Server
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=${opencode_path} serve --port 4096 --hostname 127.0.0.1
-WorkingDirectory=${opencode_workdir}
-Restart=on-failure
-RestartSec=5
-Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_PASSWORD:-}
-
-[Install]
-WantedBy=default.target
-EOF
-        systemctl --user daemon-reload
-        print_success "OpenCode server systemd service configured"
-    fi
-}
-
-start_opencode_service() {
-    if is_macos; then
-        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
-        if [ ! -f "$plist_path" ]; then
-            setup_opencode_service
-        fi
-        launchctl unload "$plist_path" 2>/dev/null || true
-        if launchctl load "$plist_path" 2>/dev/null; then
-            print_success "OpenCode server service loaded"
-        else
-            launchctl bootstrap user/$(id -u) "$plist_path" 2>/dev/null || {
-                print_error "Failed to load OpenCode server service"
-                return 1
-            }
-        fi
-    elif is_systemd_available; then
-        local service_path="${HOME}/.config/systemd/user/opencode-server.service"
-        if [ ! -f "$service_path" ]; then
-            setup_opencode_service
-        fi
-        systemctl --user enable opencode-server 2>/dev/null || true
-        systemctl --user start opencode-server
-        print_success "OpenCode server service started"
-    else
-        local opencode_path
-        local opencode_workdir
-        opencode_path=$(which opencode)
-        opencode_workdir="$(get_opencode_workdir)"
-        mkdir -p "$opencode_workdir"
-        (
-            cd "$opencode_workdir" || exit 1
-            OPENCODE_SERVER_PASSWORD="${OPENCODE_PASSWORD:-}" nohup "$opencode_path" serve --port 4096 --hostname 127.0.0.1 > "${LOG_DIR}/opencode-server.log" 2>&1 &
-            echo $! > "${LOG_DIR}/opencode-server.pid"
-        )
-        print_success "OpenCode server started (nohup)"
-    fi
-}
-
-stop_opencode_service() {
-    if is_macos; then
-        local plist_path="${HOME}/Library/LaunchAgents/com.opencode.server.plist"
-        if launchctl list | grep -q "com.opencode.server"; then
-            launchctl stop com.opencode.server 2>/dev/null || true
-            launchctl unload "$plist_path" 2>/dev/null || true
-            print_success "OpenCode server service stopped"
-        fi
-    elif is_systemd_available; then
-        if systemctl --user is-active opencode-server > /dev/null 2>&1; then
-            systemctl --user stop opencode-server
-            print_success "OpenCode server service stopped"
-        fi
-    else
-        if [ -f "${LOG_DIR}/opencode-server.pid" ]; then
-            local pid
-            pid=$(cat "${LOG_DIR}/opencode-server.pid" 2>/dev/null)
-            if kill -0 "$pid" 2>/dev/null; then
-                kill "$pid" 2>/dev/null || true
-                print_success "OpenCode server stopped"
-            fi
-            rm -f "${LOG_DIR}/opencode-server.pid"
-        fi
-    fi
-    pkill -f "opencode serve" 2>/dev/null || true
-}
-
-
-
-check_and_start_opencode() {
-    local auto_start="${1:-false}"
-    
+check_opencode_server() {
     print_info "Checking OpenCode server..."
-    
-    if curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        local health
+    if [ -n "${OPENCODE_PASSWORD:-}" ] && curl -sf -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health" > /dev/null 2>&1; then
+        local health version
         health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        local version
         version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
         print_success "OpenCode server running (v${version})"
         return 0
-    elif curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        local health
+    elif curl -sf "${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health" > /dev/null 2>&1; then
+        local health version
         health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        local version
         version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version}, no password)"
+        print_success "OpenCode server running (v${version})"
         return 0
-    fi
-    
-    if [ "$auto_start" = "true" ]; then
-        print_warning "OpenCode server not running at ${OPENCODE_SERVER_URL}"
-        print_info "Starting OpenCode server automatically..."
-        
-        if ! command -v opencode &> /dev/null; then
-            print_error "opencode command not found"
-            print_info "Please install OpenCode: https://opencode.ai"
-            return 1
-        fi
-        
-        start_opencode_service
-        
-        print_info "Waiting for OpenCode server..."
-        local max_wait=30
-        local waited=0
-        while [ $waited -lt $max_wait ]; do
-            if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-                local health
-                health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-                local version
-                version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-                print_success "OpenCode server ready (v${version})"
-                return 0
-            fi
-            sleep 1
-            ((waited++))
-        done
-        
-        if ! curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-            print_error "Failed to start OpenCode server"
-            return 1
-        fi
     else
-        print_error "Cannot connect to OpenCode server at ${OPENCODE_SERVER_URL}"
-        print_info "Please ensure opencode serve is running"
+        print_error "Cannot connect to OpenCode server at ${OPENCODE_SERVER_URL:-http://localhost:4096}"
+        print_info "Please start it manually: opencode serve --port 4096 --hostname 127.0.0.1"
         return 1
     fi
 }
@@ -327,7 +150,7 @@ cmd_start() {
     print_info "Building..."
     cd "$SCRIPT_DIR" && npm run build || { print_error "Build failed"; exit 1; }
 
-    check_and_start_opencode true || exit 1
+    check_opencode_server || exit 1
 
     print_info "Starting in background mode..."
     
@@ -587,31 +410,19 @@ TELEGRAM_MODE=polling
 OPENCODE_SERVER_URL=http://localhost:4096
 OPENCODE_USERNAME=opencode
 OPENCODE_PASSWORD=$opencode_password
-WORKSPACE_PATH=$DEFAULT_OPENCODE_WORKDIR
-
-# Session Configuration
-SESSION_STORAGE=file
-EOF
-
-    if [[ "$setup_target" == "global" ]]; then
-        echo "SESSION_FILE_PATH=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/sessions.json" >> "$target_env_file"
-        echo "WHITELIST_FILE=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json" >> "$target_env_file"
-        echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
-    else
-        echo "SESSION_FILE_PATH=${SCRIPT_DIR}/data/sessions.json" >> "$target_env_file"
-        echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
-        echo "PAIRING_CODE_TTL=2" >> "$target_env_file"
-    fi
-    
-    cat >> "$target_env_file" << EOF
-SESSION_TTL=86400
-
 
 # Application Configuration
 LOG_LEVEL=info
 MAX_MESSAGE_LENGTH=4000
 CODE_BLOCK_TIMEOUT=120000
 EOF
+
+    if [[ "$setup_target" == "global" ]]; then
+        echo "WHITELIST_FILE=${GLOBAL_CONFIG_DIR}/opencode-telegram-data/whitelist.json" >> "$target_env_file"
+    else
+        echo "WHITELIST_FILE=${SCRIPT_DIR}/data/whitelist.json" >> "$target_env_file"
+    fi
+    echo "PAIRING_CODE_TTL=2" >> "$target_env_file" 
     
     echo ""
     print_success "Configuration saved to: $target_env_file"
@@ -619,7 +430,6 @@ EOF
     # Create directories
     mkdir -p "${SCRIPT_DIR}/data"
     mkdir -p "${SCRIPT_DIR}/shared"
-    mkdir -p "$WORKSPACE_PATH"
     
     print_success "Directories created"
     
@@ -670,7 +480,7 @@ cmd_host() {
     print_info "Building..."
     cd "$SCRIPT_DIR" && npm run build || { print_error "Build failed"; exit 1; }
 
-    check_and_start_opencode true || exit 1
+    check_opencode_server || exit 1
 
     echo ""
     print_info "Starting Telegram Bot..."
@@ -764,68 +574,9 @@ cmd_status() {
     fi
     
     echo ""
-    
-    echo -e "${CYAN}OpenCode Server Service${NC}"
-    echo "------------------------------"
-    local opencode_service_running=false
-    if is_macos; then
-        if launchctl list | grep -q "com.opencode.server"; then
-            print_success "OpenCode server service: Loaded (launchd)"
-            opencode_service_running=true
-        else
-            print_info "OpenCode server service: Not loaded"
-        fi
-    elif is_systemd_available; then
-        if systemctl --user is-active opencode-server > /dev/null 2>&1; then
-            print_success "OpenCode server service: Active (systemd)"
-            opencode_service_running=true
-        else
-            print_info "OpenCode server service: Inactive"
-        fi
-    else
-        if [ -f "${LOG_DIR}/opencode-server.pid" ]; then
-            local opencode_pid
-            opencode_pid=$(cat "${LOG_DIR}/opencode-server.pid" 2>/dev/null)
-            if kill -0 "$opencode_pid" 2>/dev/null; then
-                print_success "OpenCode server: Running (PID: $opencode_pid)"
-                opencode_service_running=true
-            else
-                print_info "OpenCode server: Not running"
-                rm -f "${LOG_DIR}/opencode-server.pid"
-            fi
-        else
-            print_info "OpenCode server: Not running"
-        fi
-    fi
-    
-    echo ""
-    
-    print_info "Checking OpenCode server..."
-    
+
     load_env 2>/dev/null || true
-    if curl -s "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        # No password required
-        OPENCODE_AUTH=""
-        health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version}, no password)"
-    elif curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" > /dev/null 2>&1; then
-        # Password required and correct
-        OPENCODE_AUTH="-u opencode:${OPENCODE_PASSWORD}"
-        health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
-        version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-        print_success "OpenCode server running (v${version}, password protected)"
-    elif [ -n "${OPENCODE_PASSWORD}" ]; then
-        # Password provided but auth failed
-        print_error "OpenCode server authentication failed"
-        print_info "Check OPENCODE_PASSWORD in .env"
-        exit 1
-    else
-        # No password provided and auth required
-        print_warning "OpenCode server requires password"
-        print_info "Add OPENCODE_PASSWORD to .env file"
-        exit 1
-    fi
+    check_opencode_server
     
     echo ""
     echo -e "${CYAN}Quick Actions${NC}"
@@ -869,7 +620,7 @@ cmd_stop() {
         fi
         rm -f "$pid_file"
     fi
-    
+
     # Stop foreground mode
     if pgrep -f "node.*standalone.js" > /dev/null; then
         pkill -f "node.*standalone.js"
@@ -877,8 +628,6 @@ cmd_stop() {
         stopped=true
     fi
     
-    stop_opencode_service
-    stopped=true
     
     if [ "$stopped" = false ]; then
         print_info "No running processes found"

@@ -30,7 +30,7 @@ export class SSEClient {
 
   start(): void {
     if (this.eventSource) {
-      console.log('[octg][sse] already running, skip start');
+      console.log('[oc_event] already running, skip start');
       return;
     }
 
@@ -41,11 +41,11 @@ export class SSEClient {
       url += `?authorization=${encodeURIComponent(this.authHeader)}`;
     }
 
-    console.log(`[octg][sse] connecting to ${this.baseUrl}/event hasAuth=${Boolean(this.authHeader)}`);
+    console.log(`[oc_event] connecting to ${this.baseUrl}/event hasAuth=${Boolean(this.authHeader)}`);
     this.eventSource = new EventSource(url);
 
     this.eventSource.onopen = () => {
-      console.log('[octg][sse] connection opened');
+      console.log('[oc_event] connection opened');
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -57,13 +57,13 @@ export class SSEClient {
         const parsed = JSON.parse(event.data) as OpenCodeEvent;
         this.handleEvent(parsed);
       } catch (error) {
-        console.error('[octg][sse] failed to parse message, raw:', event.data, error);
+        console.error('[oc_event] failed to parse message, raw:', event.data, error);
       }
     };
 
     this.eventSource.onerror = (error) => {
       const state = this.eventSource?.readyState;
-      console.error(`[octg][sse] error readyState=${state}:`, error);
+      console.error(`[oc_event] error readyState=${state}:`, error);
 
       if (this.isManualClose) {
         return;
@@ -72,9 +72,9 @@ export class SSEClient {
       this.eventSource?.close();
       this.eventSource = null;
 
-      console.log(`[octg][sse] will reconnect in ${this.reconnectDelay}ms`);
+      console.log(`[oc_event] will reconnect in ${this.reconnectDelay}ms`);
       this.reconnectTimer = setTimeout(() => {
-        console.log('[octg][sse] reconnecting...');
+        console.log('[oc_event] reconnecting...');
         this.start();
       }, this.reconnectDelay);
     };
@@ -91,7 +91,7 @@ export class SSEClient {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
-      console.log('[octg][sse] connection closed');
+      console.log('[oc_event] connection closed');
     }
   }
 
@@ -120,7 +120,7 @@ export class SSEClient {
       try {
         handler(event);
       } catch (error) {
-        console.error('[octg][sse] event handler error:', error);
+        console.error('[oc_event] event handler error:', error);
       }
     }
   }

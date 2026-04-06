@@ -108,9 +108,10 @@ Other useful commands:
 | `/start` | Start using the bot | `/start` |
 | `/help` | Show help | `/help` |
 | `/status` | Check OpenCode status | `/status` |
-| `/sessions` | List sessions, search, and paginate with buttons | `/sessions` |
+| `/sessions` | List sessions, search, paginate, or remove with subcommand | `/sessions` |
 | `/sessions <index>` | Attach to a session by list index | `/sessions 3` |
 | `/sessions <id-prefix>` | Attach to a session by id prefix | `/sessions abc123` |
+| `/sessions remove <index\|id-prefix>` | Remove a session by list index or id prefix | `/sessions remove 3` |
 | `/new [title]` | Create a new session | `/new bugfix flow` |
 | `/cwd` | Show current directory | `/cwd` |
 | `/model` | Show current model override | `/model` |
@@ -121,7 +122,7 @@ Other useful commands:
 | `/agents <name>` | Set the agent override for future messages | `/agents build` |
 | `/ls [path]` | List files | `/ls src` |
 | `/cat <file>` | Read file | `/cat README.md` |
-| `/code <desc>` | Generate code | `/code React button` |
+| `/task <desc>` | Submit async task (long-running) | `/task create a React button` |
 | `/shell <cmd>` | Run shell command | `/shell ls -la` |
 | `/todos` | List todos | `/todos` |
 

@@ -91,7 +91,16 @@ export class OpenCodeClient {
         throw new Error(`HTTP ${response.status}: ${text}`);
       }
 
-      return (await response.json()) as T;
+      if (response.status === 204) {
+        return undefined as T;
+      }
+
+      const raw = await response.text();
+      if (!raw.trim()) {
+        return undefined as T;
+      }
+
+      return JSON.parse(raw) as T;
     } catch (error) {
       clearTimeout(timeoutId);
 
@@ -148,6 +157,20 @@ export class OpenCodeClient {
     overrides: RequestOverrides = {}
   ): Promise<MessageResponse> {
     return this.request(`/session/${sessionId}/message`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...overrides,
+        parts: [{ type: 'text', text }],
+      }),
+    });
+  }
+
+  async sendMessageAsyncWithOverrides(
+    sessionId: string,
+    text: string,
+    overrides: RequestOverrides = {}
+  ): Promise<void> {
+    await this.request(`/session/${sessionId}/prompt_async`, {
       method: 'POST',
       body: JSON.stringify({
         ...overrides,

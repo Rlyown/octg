@@ -19,12 +19,14 @@ export class BotHandlers {
   private static readonly FALLBACK_MODEL = 'openai/gpt-5.4';
   private static readonly LOCAL_COMMANDS = new Set([
     'pair', 'start', 'help', 'status', 'new', 'sessions', 'cwd',
-    'model', 'agents', 'ls', 'cat', 'code', 'shell', 'todos',
+    'model', 'agents', 'ls', 'cat', 'task', 'shell', 'todos',
     'history', 'search', 'findfile', 'rename', 'fork', 'abort',
     'share', 'unshare', 'diff', 'summarize', 'projects', 'commands',
     'config', 'providers', 'status-all', 'children',
     'init', 'symbol', 'git-status', 'tools',
   ]);
+
+  private static readonly CODE_JOB_TIMEOUT_MS = 3 * 60 * 1000;
 
   private bot: Telegraf;
   private opencode: OpenCodeClient;
@@ -33,6 +35,12 @@ export class BotHandlers {
   private config: PluginConfig;
   private sseClient: SSEClient | null = null;
   private permissionHandler: PermissionHandler;
+  private pendingCodeJobs = new Map<string, {
+    chatId: string;
+    startedAt: number;
+    messageCountBefore: number;
+    timeoutTimer: NodeJS.Timeout;
+  }>();
 
   constructor(
     bot: Telegraf,
@@ -91,46 +99,88 @@ export class BotHandlers {
       this.config.opencode.password
     );
 
-    this.sseClient.on('session.permission.requested', (event) => {
-      this.permissionHandler.handlePermissionRequest(event.data as {
+    this.sseClient.on('permission.asked', (event) => {
+      const props = event.properties as {
+        id: string;
         sessionID: string;
-        permissionID: string;
-        description?: string;
-        tool?: string;
-        action?: string;
+        permission: string;
+        patterns: string[];
+        metadata: Record<string, unknown>;
+        always: string[];
+        tool?: { messageID: string; callID: string };
+      };
+      this.permissionHandler.handlePermissionRequest({
+        sessionID: props.sessionID,
+        permissionID: props.id,
+        description: props.permission,
+        tool: props.tool?.callID,
+        action: props.patterns?.[0],
       });
     });
 
-    this.sseClient.on('message.created', (event) => {
-      this.handleSSEMessage(event.data as {
-        sessionID?: string;
-        message?: { role?: string; parts?: Array<{ type: string; text?: string }> };
-      });
+    this.sseClient.on('session.status', (event) => {
+      const props = event.properties as { sessionID: string; status: { type: string } };
+      if (props.status?.type === 'idle') {
+        void this.resolveCodeJob(props.sessionID);
+      }
     });
 
     this.sseClient.start();
   }
 
-  private async handleSSEMessage(data: {
-    sessionID?: string;
-    message?: { role?: string; parts?: Array<{ type: string; text?: string }> };
-  }): Promise<void> {
-    if (!data.sessionID || data.message?.role !== 'assistant') return;
+  private async resolveCodeJob(sessionID: string): Promise<void> {
+    const job = this.pendingCodeJobs.get(sessionID);
+    if (!job) return;
 
-    const sessions = await this.sessions.getAll();
-    const session = sessions.find((s: TelegramSession) => s.openCodeSessionId === data.sessionID);
-    if (!session) return;
-
-    const text = data.message?.parts?.find(p => p.type === 'text')?.text;
-    if (!text || text.length < 10) return;
+    this.pendingCodeJobs.delete(sessionID);
+    clearTimeout(job.timeoutTimer);
 
     try {
-      await this.bot.telegram.sendMessage(
-        session.telegramChatId,
-        `🤖 AI 回复:\n\n${text.slice(0, 500)}${text.length > 500 ? '...' : ''}`
+      const messages = await this.opencode.listMessages(sessionID, 50);
+      const assistantMessages = messages.filter((m) => m.info.role === 'assistant');
+      const sid = this.shortId(sessionID);
+      console.log(
+        `[octg][code] resolveCodeJob session=${sid}` +
+        ` totalMessages=${messages.length} assistantMessages=${assistantMessages.length}` +
+        ` messageCountBefore=${job.messageCountBefore}`
       );
+
+      const extractText = (m: typeof assistantMessages[0]) =>
+        m.parts
+          .filter((p) => p.type === 'text' && typeof p.text === 'string' && p.text.length > 0)
+          .map((p) => p.text as string)
+          .join('\n')
+          .trim();
+
+      const newAssistantMessages = assistantMessages.slice(job.messageCountBefore);
+      const textMessages = newAssistantMessages
+        .map((m) => ({ id: m.info.id, text: extractText(m) }))
+        .filter((m) => m.text.length > 0);
+
+      console.log(
+        `[octg][code] resolveCodeJob session=${sid}` +
+        ` newAssistant=${newAssistantMessages.length} withText=${textMessages.length}`
+      );
+
+      if (textMessages.length === 0) {
+        console.warn(`[octg][code] no text messages found session=${sid}`);
+        await this.bot.telegram.sendMessage(job.chatId, '⚠️ 任务已完成，但未找到文字回复。');
+        return;
+      }
+
+      for (const msg of textMessages) {
+        const formatted = formatCodeResponse(msg.text);
+        await this.bot.telegram.sendMessage(job.chatId, formatted, { parse_mode: 'Markdown' })
+          .catch(() =>
+            this.bot.telegram.sendMessage(
+              job.chatId,
+              `✅ 代码任务完成\n\n${msg.text.slice(0, this.config.app.maxMessageLength)}`
+            )
+          );
+      }
     } catch (error) {
-      console.error('Failed to send SSE message to Telegram:', error);
+      console.error(`[octg][code] resolveCodeJob failed session=${this.shortId(sessionID)}:`, error);
+      await this.bot.telegram.sendMessage(job.chatId, `❌ 获取结果失败: ${error}`).catch(() => {});
     }
   }
 
@@ -152,7 +202,7 @@ export class BotHandlers {
     // File operations
     this.bot.command('ls', this.withWhitelist(this.handleListFiles.bind(this)));
     this.bot.command('cat', this.withWhitelist(this.handleReadFile.bind(this)));
-    this.bot.command('code', this.withWhitelist(this.handleCode.bind(this)));
+    this.bot.command('task', this.withWhitelist(this.handleCode.bind(this)));
     this.bot.command('shell', this.withWhitelist(this.handleShell.bind(this)));
     this.bot.command('todos', this.withWhitelist(this.handleTodos.bind(this)));
     this.bot.command('history', this.withWhitelist(this.handleHistory.bind(this)));
@@ -311,14 +361,14 @@ export class BotHandlers {
 发送任意消息创建新会话，或使用 /new [标题] 手动创建。
 
 可用命令：
-/sessions - 查看/切换会话
+/sessions - 查看/切换/删除会话
 /new [title] - 创建新会话
 /rename <名称> - 重命名会话
 /cwd - 查看当前目录
 /projects - 列出项目
 /model - 查看/设置模型
 /agents - 查看/设置 agent
-/code <描述> - 生成代码
+/task <描述> - 提交异步任务
 /ls [路径] - 列出文件
 /cat <文件> - 查看文件
 /search <关键词> - 搜索代码
@@ -348,7 +398,7 @@ export class BotHandlers {
 
 会话管理：
 /new [title] - 创建新会话
-/sessions - 查看/切换会话
+/sessions - 查看/切换/删除会话
 /rename <名称> - 重命名会话
 /fork [id] - 分叉会话
 /abort - 中止会话
@@ -375,7 +425,7 @@ AI 设置：
 /git-status - 查看 Git 状态
 
 代码与执行：
-/code <描述> - 生成代码
+/task <描述> - 提交异步任务
 /shell <命令> - 执行 shell
 
 任务与历史：
@@ -519,31 +569,52 @@ AI 设置：
     const session = await this.ensureSession(ctx);
     if (!session) return;
 
-    const message = ctx.message as Message.TextMessage;
-    const prompt = message.text.replace('/code', '').trim();
+    const sessionId = session.openCodeSessionId;
 
-    if (!prompt) {
-      await ctx.reply('请提供代码描述，例如: /code 创建一个 React 按钮组件');
+    if (this.pendingCodeJobs.has(sessionId)) {
+      await ctx.reply('⏳ 当前 session 已有进行中的 /task 任务，请等待完成或使用 /abort 中止。');
       return;
     }
 
-    const processingMsg = await ctx.reply('🤔 正在生成代码...');
+    const message = ctx.message as Message.TextMessage;
+    const prompt = message.text.replace('/task', '').trim();
+
+    if (!prompt) {
+      await ctx.reply('请提供任务描述，例如: /task 创建一个 React 按钮组件');
+      return;
+    }
 
     try {
-      const response = await this.opencode.sendMessageWithOverrides(
-        session.openCodeSessionId,
-        prompt,
-        await this.getOverrides(session)
+      const messages = await this.opencode.listMessages(sessionId, 50);
+      const messageCountBefore = messages.filter((m) => m.info.role === 'assistant').length;
+      const overrides = await this.getOverrides(session);
+
+      await this.opencode.sendMessageAsyncWithOverrides(sessionId, prompt, overrides);
+
+      const timeoutTimer = setTimeout(() => {
+        const job = this.pendingCodeJobs.get(sessionId);
+        if (!job) return;
+        this.pendingCodeJobs.delete(sessionId);
+        void this.bot.telegram.sendMessage(
+          job.chatId,
+          '⚠️ 代码任务超时，仍在运行或结果未同步。\n\n请稍后用 /history 查看结果，或用 /abort 中止。'
+        ).catch(() => {});
+      }, BotHandlers.CODE_JOB_TIMEOUT_MS);
+
+      this.pendingCodeJobs.set(sessionId, {
+        chatId: session.telegramChatId,
+        startedAt: Date.now(),
+        messageCountBefore,
+        timeoutTimer,
+      });
+
+      await ctx.reply(
+        `🚀 代码任务已提交\n\n` +
+        `⚙️ ${this.summarizeOverrides(overrides)}\n\n` +
+        `完成后自动推送结果，如需中止可用 /abort。`
       );
-      const text = response.parts.map(p => p.text).join('\n');
-
-      // Delete processing message
-      await ctx.deleteMessage(processingMsg.message_id);
-
-      // Send response
-      await ctx.reply(formatCodeResponse(text), { parse_mode: 'Markdown' });
     } catch (error) {
-      await ctx.reply(`❌ 生成代码失败: ${error}`);
+      await ctx.reply(`❌ 提交代码任务失败: ${error}`);
     }
   }
 
@@ -725,6 +796,11 @@ AI 设置：
     }
 
     const parsed = this.parseSessionsArgs(args);
+
+    if (parsed.removeTarget) {
+      await this.removeSession(ctx, parsed.removeTarget);
+      return;
+    }
 
     if (parsed.index !== undefined) {
       await this.attachToSessionByIndex(ctx, parsed.index);
@@ -1108,9 +1184,21 @@ AI 设置：
     });
   }
 
-  private parseSessionsArgs(args: string[]): { index?: number; query?: string; lookup?: string } {
+  private parseSessionsArgs(args: string[]): {
+    index?: number;
+    query?: string;
+    lookup?: string;
+    removeTarget?: string;
+  } {
     if (args.length === 0) {
       return {};
+    }
+
+    const [command, ...rest] = args;
+    if ((command === 'remove' || command === 'rm' || command === 'delete' || command === 'del') && rest.length > 0) {
+      return {
+        removeTarget: rest.join(' ').trim(),
+      };
     }
 
     if (args.length === 1 && /^\d+$/.test(args[0])) {
@@ -1124,6 +1212,83 @@ AI 设置：
     return {
       query: args.join(' ').trim() || undefined,
     };
+  }
+
+  private async removeSession(ctx: Context<Update.MessageUpdate>, target: string): Promise<void> {
+    const userId = ctx.from?.id.toString();
+    if (!userId) {
+      await ctx.reply('无法获取用户信息');
+      return;
+    }
+
+    try {
+      const sessions = await this.opencode.listSessions();
+      const resolved = this.resolveSessionTarget(sessions, target);
+
+      if (resolved.error) {
+        await ctx.reply(resolved.error);
+        return;
+      }
+
+      const sessionToRemove = resolved.session!;
+      await this.opencode.deleteSession(sessionToRemove.id);
+
+      const currentSession = this.sessions.get(userId);
+      const isCurrent = currentSession?.openCodeSessionId === sessionToRemove.id;
+      if (isCurrent) {
+        this.sessions.delete(userId);
+      }
+
+      await ctx.reply(
+        `✅ 已删除 session\n\n` +
+        `🪪 ${sessionToRemove.id.slice(0, 12)}...\n` +
+        `🏷️ ${sessionToRemove.title || 'Untitled'}${isCurrent ? '\n\n当前绑定也已清除，发送任意消息或用 /new 可创建新会话。' : ''}`
+      );
+    } catch (error) {
+      await ctx.reply(`❌ 删除 session 失败: ${error}`);
+    }
+  }
+
+  private resolveSessionTarget(
+    sessions: Array<{ id: string; title?: string }>,
+    target: string
+  ): { session?: { id: string; title?: string }; error?: string } {
+    const normalized = target.trim();
+    if (!normalized) {
+      return {
+        error: '❌ 请提供要删除的 session 序号或 id\n\n例如：/sessions remove 3',
+      };
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      const index = Number.parseInt(normalized, 10);
+      const session = sessions[index - 1];
+      if (!session) {
+        return {
+          error: `❌ 找不到序号 ${index} 对应的 session\n\n用 /sessions 查看可用列表`,
+        };
+      }
+
+      return { session };
+    }
+
+    const exact = sessions.find(session => session.id === normalized);
+    const matches = exact ? [exact] : sessions.filter(session => session.id.startsWith(normalized));
+
+    if (matches.length === 0) {
+      return {
+        error: `❌ 找不到 session: ${normalized}\n\n用 /sessions 查看可用列表`,
+      };
+    }
+
+    if (matches.length > 1) {
+      const options = matches.slice(0, 5).map(session => `${session.id.slice(0, 12)}...  ${session.title || 'Untitled'}`);
+      return {
+        error: `⚠️ 前缀匹配到多个 session，请提供更长的 id:\n\n${options.join('\n')}`,
+      };
+    }
+
+    return { session: matches[0] };
   }
 
   private getSessionsPageSize(): number {

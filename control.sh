@@ -323,14 +323,12 @@ cmd_start() {
         fi
     fi
     
-    # Check if compiled
-    if [ ! -f "${SCRIPT_DIR}/dist/standalone.js" ]; then
-        print_warning "Compiled code not found, building..."
-        cd "$SCRIPT_DIR" && npm run build
-    fi
-    
+    # Build
+    print_info "Building..."
+    cd "$SCRIPT_DIR" && npm run build || { print_error "Build failed"; exit 1; }
+
     check_and_start_opencode true || exit 1
-    
+
     print_info "Starting in background mode..."
     
     if is_macos; then
@@ -668,14 +666,12 @@ cmd_host() {
     print_info "Starting in HOST mode..."
     echo ""
     
-    # Check if compiled
-    if [ ! -f "${SCRIPT_DIR}/dist/standalone.js" ]; then
-        print_warning "Compiled code not found, building..."
-        cd "$SCRIPT_DIR" && npm run build
-    fi
-    
+    # Build
+    print_info "Building..."
+    cd "$SCRIPT_DIR" && npm run build || { print_error "Build failed"; exit 1; }
+
     check_and_start_opencode true || exit 1
-    
+
     echo ""
     print_info "Starting Telegram Bot..."
     echo "Press Ctrl+C to stop"

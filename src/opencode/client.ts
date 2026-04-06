@@ -68,7 +68,7 @@ export class OpenCodeClient {
     const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
     if (logRequest) {
-      console.log(`[octg][opencode] ${method} ${logPath} started`);
+      console.log(`[oc_server_client] ${method} ${logPath} started`);
     }
 
     try {
@@ -82,7 +82,7 @@ export class OpenCodeClient {
 
        if (logRequest) {
         console.log(
-          `[octg][opencode] ${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
+          `[oc_server_client] ${method} ${logPath} responded ${response.status} in ${Date.now() - startedAt}ms`
         );
       }
 
@@ -107,7 +107,7 @@ export class OpenCodeClient {
       if (logRequest) {
         const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         console.error(
-          `[octg][opencode] ${method} ${logPath} failed after ${Date.now() - startedAt}ms - ${message}`
+          `[oc_server_client] ${method} ${logPath} failed after ${Date.now() - startedAt}ms - ${message}`
         );
       }
 

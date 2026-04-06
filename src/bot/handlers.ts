@@ -1,11 +1,10 @@
 import type { Context, Telegraf } from 'telegraf';
 import type { InlineKeyboardMarkup, Message, Update } from 'telegraf/types';
-import { resolve } from 'path';
 import type { OpenCodeClient } from '../opencode/client.js';
 import type { SessionManager } from '../session/manager.js';
 import type { PluginConfig, RequestOverrides, TelegramSession } from '../types.js';
 import { WhitelistManager } from '../auth/whitelist.js';
-import { SSEClient } from '../opencode/sse-client.js';
+import { SSEClient } from '../opencode/oc-event.js';
 import { PermissionHandler } from '../opencode/permission-handler.js';
 import {
   formatCodeResponse,
@@ -46,20 +45,14 @@ export class BotHandlers {
     bot: Telegraf,
     opencode: OpenCodeClient,
     sessions: SessionManager,
-    config: PluginConfig
+    config: PluginConfig,
+    whitelist: WhitelistManager
   ) {
     this.bot = bot;
     this.opencode = opencode;
     this.sessions = sessions;
     this.config = config;
-
-    const whitelistFile = config.app.whitelistFile || './data/whitelist.json';
-    const absoluteWhitelistFile = resolve(process.cwd(), whitelistFile);
-
-    this.whitelist = new WhitelistManager(
-      absoluteWhitelistFile,
-      config.app.pairingCodeTtl || 2
-    );
+    this.whitelist = whitelist;
 
     this.permissionHandler = new PermissionHandler(bot, opencode, sessions);
 

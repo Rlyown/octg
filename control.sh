@@ -114,7 +114,7 @@ check_opencode_server() {
 
 # Background daemon management
 daemon_name="opencode-telegram"
-LOG_DIR="${HOME}/.local/share/agent-toolkits/logs"
+LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
 pid_file="${LOG_DIR}/opencode-telegram.pid"
 log_file="${LOG_DIR}/opencode-telegram.log"

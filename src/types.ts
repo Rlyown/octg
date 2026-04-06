@@ -8,6 +8,7 @@ export interface TelegramConfig {
   mode: 'webhook' | 'polling';
   webhookUrl?: string;
   webhookPort: number;
+  handlerTimeout: number;
   allowedUserIds: string[];
 }
 
@@ -178,6 +179,9 @@ export interface HealthResponse {
 export interface Agent {
   name: string;
   description?: string;
+  mode?: 'primary' | 'subagent' | 'all';
+  hidden?: boolean;
+  native?: boolean;
   slug?: string;
 }
 
@@ -235,13 +239,14 @@ export const configSchema = {
     mode: { type: 'string', enum: ['webhook', 'polling'], default: 'polling' },
     webhookUrl: { type: 'string' },
     webhookPort: { type: 'number', default: 3000 },
+    handlerTimeout: { type: 'number', default: 600000 },
     allowedUserIds: { type: 'array', items: 'string', default: [] },
   },
   opencode: {
     serverUrl: { type: 'string', default: 'http://localhost:4096' },
     username: { type: 'string', default: 'opencode' },
     password: { type: 'string' },
-    requestTimeout: { type: 'number', default: 60000 },
+    requestTimeout: { type: 'number', default: 600000 },
   },
   app: {
     logLevel: { type: 'string', enum: ['debug', 'info', 'warn', 'error'], default: 'info' },

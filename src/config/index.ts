@@ -15,12 +15,13 @@ function getDefaultConfig(): PluginConfig {
       botToken: '',
       mode: 'polling',
       webhookPort: 3000,
+      handlerTimeout: 600000,
       allowedUserIds: [],
     },
     opencode: {
       serverUrl: 'http://localhost:4096',
       username: 'opencode',
-      requestTimeout: 60000,
+      requestTimeout: 600000,
     },
     app: {
       logLevel: 'info',
@@ -65,6 +66,7 @@ function loadEnvConfig(): Partial<PluginConfig> {
     { env: 'TELEGRAM_MODE', path: 'telegram.mode' },
     { env: 'TELEGRAM_WEBHOOK_URL', path: 'telegram.webhookUrl' },
     { env: 'TELEGRAM_WEBHOOK_PORT', path: 'telegram.webhookPort', parser: (v) => parseInt(v, 10) },
+    { env: 'TELEGRAM_HANDLER_TIMEOUT', path: 'telegram.handlerTimeout', parser: (v) => parseInt(v, 10) },
     { env: 'TELEGRAM_ALLOWED_USER_IDS', path: 'telegram.allowedUserIds', parser: (v) => v.split(',').map(id => id.trim()).filter(Boolean) },
     // OpenCode
     { env: 'OPENCODE_SERVER_URL', path: 'opencode.serverUrl' },

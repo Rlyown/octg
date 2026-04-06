@@ -27,11 +27,11 @@ export interface HandlerContext {
 export class BotHandlers {
   private static readonly LOCAL_COMMANDS = new Set([
     'pair', 'start', 'help', 'status', 'new', 'remove', 'sessions', 'cwd',
-    'model', 'agents', 'ls', 'cat', 'task', 'shell', 'todos',
+    'model', 'agents', 'plan', 'build', 'ls', 'cat', 'task', 'shell', 'todos',
     'history', 'search', 'findfile', 'rename', 'fork', 'abort',
     'share', 'unshare', 'diff', 'summarize', 'projects', 'commands',
-    'config', 'providers', 'status-all', 'children',
-    'init', 'symbol', 'git-status', 'tools',
+    'config', 'providers', 'status_all', 'children',
+    'init', 'symbol', 'git_status', 'tools',
   ]);
 
   private bot: Telegraf;
@@ -159,6 +159,8 @@ export class BotHandlers {
     this.bot.command('cwd', this.withWhitelist(this.generalHandler.handleCwd.bind(this.generalHandler)));
     this.bot.command('model', this.withWhitelist(this.modelHandler.handleModel.bind(this.modelHandler)));
     this.bot.command('agents', this.withWhitelist(this.modelHandler.handleAgents.bind(this.modelHandler)));
+    this.bot.command('plan', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'plan')));
+    this.bot.command('build', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'build')));
     this.bot.action(/^sessions:(\d+)(?::(.*))?$/, this.sessionHandler.handleSessionsPage.bind(this.sessionHandler));
 
     // File operations
@@ -181,11 +183,11 @@ export class BotHandlers {
     this.bot.command('commands', this.withWhitelist(this.generalHandler.handleCommands.bind(this.generalHandler)));
     this.bot.command('config', this.withWhitelist(this.generalHandler.handleConfig.bind(this.generalHandler)));
     this.bot.command('providers', this.withWhitelist(this.generalHandler.handleProviders.bind(this.generalHandler)));
-    this.bot.command('status-all', this.withWhitelist(this.generalHandler.handleStatusAll.bind(this.generalHandler)));
+    this.bot.command('status_all', this.withWhitelist(this.generalHandler.handleStatusAll.bind(this.generalHandler)));
     this.bot.command('children', this.withWhitelist(this.sessionHandler.handleChildren.bind(this.sessionHandler)));
     this.bot.command('init', this.withWhitelist(this.fileHandler.handleInit.bind(this.fileHandler)));
     this.bot.command('symbol', this.withWhitelist(this.fileHandler.handleSymbol.bind(this.fileHandler)));
-    this.bot.command('git-status', this.withWhitelist(this.fileHandler.handleGitStatus.bind(this.fileHandler)));
+    this.bot.command('git_status', this.withWhitelist(this.fileHandler.handleGitStatus.bind(this.fileHandler)));
     this.bot.command('tools', this.withWhitelist(this.fileHandler.handleTools.bind(this.fileHandler)));
 
     this.bot.action(/^perm:(allow|allow-remember|deny):(.+)$/, this.handlePermissionAction.bind(this));

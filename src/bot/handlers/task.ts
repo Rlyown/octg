@@ -39,11 +39,15 @@ export class TaskHandler {
     }
 
     try {
-      const messages = await this.hctx.opencode.listMessages(sessionId, 50);
+      const messages = await this.hctx.opencode.listMessages(sessionId, 50, {
+        directory: session.directory,
+      });
       const messageCountBefore = messages.filter((m) => m.info.role === 'assistant').length;
       const overrides = await this.modelHandler.getOverrides(session);
 
-      await this.hctx.opencode.sendMessageAsyncWithOverrides(sessionId, prompt, overrides);
+      await this.hctx.opencode.sendMessageAsyncWithOverrides(sessionId, prompt, overrides, {
+        directory: session.directory,
+      });
 
       const timeoutTimer = setTimeout(() => {
         const job = this.pendingTaskJobs.get(sessionId);
@@ -97,7 +101,8 @@ export class TaskHandler {
       const response = await this.hctx.opencode.executeShell(
         session.openCodeSessionId,
         command,
-        await this.modelHandler.getOverrides(session)
+        await this.modelHandler.getOverrides(session),
+        { directory: session.directory }
       );
 
       await ctx.deleteMessage(processingMsg.message_id);
@@ -121,7 +126,10 @@ export class TaskHandler {
     clearTimeout(job.timeoutTimer);
 
     try {
-      const messages = await this.hctx.opencode.listMessages(sessionID, 50);
+      const activeSession = this.hctx.sessions.get();
+      const messages = await this.hctx.opencode.listMessages(sessionID, 50, {
+        directory: activeSession?.openCodeSessionId === sessionID ? activeSession.directory : undefined,
+      });
       const assistantMessages = messages.filter((m) => m.info.role === 'assistant');
       const sid = this.hctx.shortId(sessionID);
       console.log(

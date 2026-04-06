@@ -4,8 +4,7 @@
 
 | 名称 | 描述 | 优先级 |
 |------|------|--------|
-| `session管理` | 每个session配置根目录，project信息，对齐opencode server API； 对话开始时提示当前 session，或默认进入第一个session | 高 |
-| `configer` | 当前启动脚本中涉及项目路径，白名单配置等路径，考虑在同一个agent下管理多个项目，因此白名单也只需要一个；另外opencode server启动有问题 | 高 |
+| `logger`| 输出日志，自动打包 | 高 |
 | `对话支持富文本` | 对话支持富文本 | 高 |
 | `POST /session/:id/command` 500 | OpenCode `1.2.27` `serve` endpoint 对 slash commands 返回 HTTP 500，影响所有转发的斜杠命令，包括 `help`、`model`、`cd`、`agents` 及未知命令 | 高 |
 

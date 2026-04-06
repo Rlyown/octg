@@ -48,6 +48,7 @@ export interface PluginConfig {
 export interface OpenCodeSession {
   id: string;
   title?: string;
+  directory?: string;
   time: { created: number; updated: number };
 }
 
@@ -132,6 +133,7 @@ export interface TelegramSession {
   telegramChatId: string;
   openCodeSessionId: string;
   openCodeSessionTitle?: string;
+  directory?: string;
   preferredModel?: string;
   preferredAgent?: string;
   createdAt: Date;

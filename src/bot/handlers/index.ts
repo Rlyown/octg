@@ -24,7 +24,7 @@ export interface HandlerContext {
 
 export class BotHandlers {
   private static readonly LOCAL_COMMANDS = new Set([
-    'pair', 'start', 'help', 'status', 'new', 'sessions', 'cwd',
+    'pair', 'start', 'help', 'status', 'new', 'remove', 'sessions', 'cwd',
     'model', 'agents', 'ls', 'cat', 'task', 'shell', 'todos',
     'history', 'search', 'findfile', 'rename', 'fork', 'abort',
     'share', 'unshare', 'diff', 'summarize', 'projects', 'commands',
@@ -151,6 +151,7 @@ export class BotHandlers {
     this.bot.command('help', this.withWhitelist(this.generalHandler.handleHelp.bind(this.generalHandler)));
     this.bot.command('status', this.withWhitelist(this.sessionHandler.handleStatus.bind(this.sessionHandler)));
     this.bot.command('new', this.withWhitelist(this.sessionHandler.handleNewSession.bind(this.sessionHandler)));
+    this.bot.command('remove', this.withWhitelist(this.sessionHandler.handleRemoveSessionCommand.bind(this.sessionHandler)));
     this.bot.command('sessions', this.withWhitelist(this.sessionHandler.handleSessions.bind(this.sessionHandler)));
     this.bot.command('cwd', this.withWhitelist(this.generalHandler.handleCwd.bind(this.generalHandler)));
     this.bot.command('model', this.withWhitelist(this.modelHandler.handleModel.bind(this.modelHandler)));
@@ -288,13 +289,22 @@ export class BotHandlers {
 
     const session = this.sessions.get();
     if (!session) {
-      await ctx.reply('还没有会话，使用 /new [标题] 创建。');
+      await ctx.reply('还没有会话，使用 /new <绝对路径> [标题] 创建。');
       return null;
     }
 
     if (!session.telegramChatId) {
       session.telegramChatId = chatId;
     }
+
+    if (!session.directory) {
+      const live = await this.opencode.getSession(session.openCodeSessionId).catch(() => null);
+      if (live?.directory) {
+        session.directory = live.directory;
+        this.sessions.set(session);
+      }
+    }
+
     this.sessions.updateActivity();
     return session;
   }
@@ -318,7 +328,7 @@ export class BotHandlers {
 
     let session = this.sessions.get();
     if (!session) {
-      await ctx.reply('还没有会话，使用 /new [标题] 创建。');
+      await ctx.reply('还没有会话，使用 /new <绝对路径> [标题] 创建。');
       return;
     }
     if (!session.telegramChatId) {
@@ -343,7 +353,8 @@ export class BotHandlers {
       const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
         message.text,
-        overrides
+        overrides,
+        { directory: session.directory }
       );
 
       console.log(

@@ -1,5 +1,6 @@
 import type { Context } from 'telegraf';
 import type { InlineKeyboardMarkup, Message, Update } from 'telegraf/types';
+import path from 'node:path';
 import type { TelegramSession } from '../../types.js';
 import { formatSessionOverview, formatStatus } from '../formatters.js';
 import type { HandlerContext } from './index.js';
@@ -14,15 +15,53 @@ export class SessionHandler {
   async handleNewSession(ctx: Context<Update.MessageUpdate>): Promise<void> {
     const message = ctx.message as Message.TextMessage;
     const args = message.text.split(' ').slice(1);
-    const title = args.join(' ').trim() || undefined;
+    await this.createSessionWithDirectory(ctx, args);
+  }
+
+  async handleRemoveSessionCommand(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    const message = ctx.message as Message.TextMessage;
+    const target = message.text.split(' ').slice(1).join(' ').trim();
+
+    if (!target) {
+      await ctx.reply('❌ 请提供要删除的 session 序号或 id\n\n例如：/remove 2');
+      return;
+    }
+
+    await this.removeSession(ctx, target);
+  }
+
+  private async createSessionWithDirectory(ctx: Context<Update.MessageUpdate>, args: string[]): Promise<void> {
+    const directory = args[0]?.trim();
+    const title = args.slice(1).join(' ').trim() || undefined;
+
+    if (!directory) {
+      await ctx.reply(
+        '❌ 请提供绝对路径\n\n' +
+        '用法: /new <绝对路径> [标题]\n' +
+        '例如: /new /Users/eason/dev/code/octg 重构 handlers'
+      );
+      return;
+    }
+
+    if (!path.isAbsolute(directory)) {
+      await ctx.reply(`❌ 路径必须是绝对路径\n\n收到: ${directory}`);
+      return;
+    }
+
+    const message = ctx.message as Message.TextMessage;
+    const requestText = message.text;
     const oldSession = this.hctx.sessions.get();
 
     try {
-      const openCodeSession = await this.hctx.opencode.createSession(title);
+      const openCodeSession = await this.hctx.opencode.createSession({
+        title,
+        directory,
+      });
       const session: TelegramSession = {
         telegramChatId: ctx.chat?.id.toString() || '',
         openCodeSessionId: openCodeSession.id,
         openCodeSessionTitle: openCodeSession.title,
+        directory,
         preferredModel: oldSession?.preferredModel,
         preferredAgent: oldSession?.preferredAgent,
         createdAt: new Date(openCodeSession.time.created),
@@ -33,10 +72,12 @@ export class SessionHandler {
       await ctx.reply(
         `✅ 已创建新会话\n\n` +
         `🪪 ${session.openCodeSessionId.slice(0, 12)}...\n` +
-        `🏷️ ${openCodeSession.title || title || 'Untitled'}`
+        `🏷️ ${openCodeSession.title || title || 'Untitled'}\n` +
+        `📂 ${session.directory}`
       );
     } catch (error) {
-      await ctx.reply(`❌ 创建新会话失败: ${error}`);
+      const detail = requestText ? `\n\n请求: ${requestText}` : '';
+      await ctx.reply(`❌ 创建新会话失败: ${error}${detail}`);
     }
   }
 
@@ -175,7 +216,9 @@ export class SessionHandler {
     const messageId = args[0] || undefined;
 
     try {
-      const forked = await this.hctx.opencode.forkSession(session.openCodeSessionId, messageId);
+      const forked = await this.hctx.opencode.forkSession(session.openCodeSessionId, messageId, {
+        directory: session.directory,
+      });
       await ctx.reply(
         `✅ 已分叉会话\n\n` +
         `🪪 ${forked.id.slice(0, 12)}...\n` +
@@ -192,7 +235,9 @@ export class SessionHandler {
     if (!session) return;
 
     try {
-      const success = await this.hctx.opencode.abortSession(session.openCodeSessionId);
+      const success = await this.hctx.opencode.abortSession(session.openCodeSessionId, {
+        directory: session.directory,
+      });
       if (success) {
         await ctx.reply('✅ 已中止会话');
       } else {
@@ -236,7 +281,9 @@ export class SessionHandler {
     const messageId = args[0] || undefined;
 
     try {
-      const diffs = await this.hctx.opencode.getSessionDiff(session.openCodeSessionId, messageId);
+      const diffs = await this.hctx.opencode.getSessionDiff(session.openCodeSessionId, messageId, {
+        directory: session.directory,
+      });
       if (diffs.length === 0) {
         await ctx.reply('暂无变更');
         return;
@@ -264,7 +311,8 @@ export class SessionHandler {
       const success = await this.hctx.opencode.summarizeSession(
         session.openCodeSessionId,
         session.preferredModel?.split('/')[0],
-        session.preferredModel?.split('/')[1]
+        session.preferredModel?.split('/')[1],
+        { directory: session.directory }
       );
       await ctx.deleteMessage(processingMsg.message_id);
 
@@ -309,8 +357,10 @@ export class SessionHandler {
     try {
       const health = await this.hctx.opencode.health();
       const project = await this.hctx.opencode.getProject();
-      const path = await this.hctx.opencode.getPath();
-      const todos = await this.hctx.opencode.getTodos(session.openCodeSessionId);
+      const path = await this.hctx.opencode.getPath({ directory: session.directory });
+      const todos = await this.hctx.opencode.getTodos(session.openCodeSessionId, {
+        directory: session.directory,
+      });
       const liveSession = await this.hctx.opencode.getSession(session.openCodeSessionId).catch(() => null);
       const resolvedModel = await this.modelHandler.getResolvedModelInfo(session);
 
@@ -369,6 +419,7 @@ export class SessionHandler {
         telegramChatId: chatId,
         openCodeSessionId: openCodeSession.id,
         openCodeSessionTitle: openCodeSession.title,
+        directory: openCodeSession.directory,
         preferredModel: oldSession?.preferredModel,
         preferredAgent: oldSession?.preferredAgent,
         createdAt: new Date(openCodeSession.time.created),
@@ -380,7 +431,8 @@ export class SessionHandler {
       await ctx.reply(
         `✅ 已切换到 session\n\n` +
         `🪪 ${openCodeSession.id.slice(0, 12)}...\n` +
-        `🏷️ ${openCodeSession.title || 'Untitled'}\n\n` +
+        `🏷️ ${openCodeSession.title || 'Untitled'}\n` +
+        `📂 ${openCodeSession.directory || 'unknown'}\n\n` +
         `说明：切换后可以继续在该 session 里发送消息；还不支持实时观察本地 TUI 正在生成的进度。`
       );
     } catch (error) {
@@ -432,7 +484,7 @@ export class SessionHandler {
       await ctx.reply(
         `✅ 已删除 session\n\n` +
         `🪪 ${sessionToRemove.id.slice(0, 12)}...\n` +
-        `🏷️ ${sessionToRemove.title || 'Untitled'}${isCurrent ? '\n\n当前绑定也已清除，发送任意消息或用 /new 可创建新会话。' : ''}`
+        `🏷️ ${sessionToRemove.title || 'Untitled'}${isCurrent ? '\n\n当前绑定也已清除，发送任意消息或用 /new <绝对路径> 可创建新会话。' : ''}`
       );
     } catch (error) {
       await ctx.reply(`❌ 删除 session 失败: ${error}`);
@@ -446,7 +498,7 @@ export class SessionHandler {
     const normalized = target.trim();
     if (!normalized) {
       return {
-        error: '❌ 请提供要删除的 session 序号或 id\n\n例如：/sessions remove 3',
+        error: '❌ 请提供要删除的 session 序号或 id\n\n例如：/remove 3',
       };
     }
 

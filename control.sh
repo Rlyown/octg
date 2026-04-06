@@ -186,6 +186,8 @@ cmd_start() {
         <string>${TELEGRAM_WEBHOOK_URL:-}</string>
         <key>TELEGRAM_WEBHOOK_PORT</key>
         <string>${TELEGRAM_WEBHOOK_PORT:-3000}</string>
+        <key>TELEGRAM_HANDLER_TIMEOUT</key>
+        <string>${TELEGRAM_HANDLER_TIMEOUT:-600000}</string>
         <key>TELEGRAM_ALLOWED_USER_IDS</key>
         <string>${TELEGRAM_ALLOWED_USER_IDS:-}</string>
         <key>OPENCODE_PASSWORD</key>
@@ -195,7 +197,7 @@ cmd_start() {
         <key>OPENCODE_USERNAME</key>
         <string>${OPENCODE_USERNAME:-opencode}</string>
         <key>OPENCODE_REQUEST_TIMEOUT</key>
-        <string>${OPENCODE_REQUEST_TIMEOUT:-60000}</string>
+        <string>${OPENCODE_REQUEST_TIMEOUT:-600000}</string>
         <key>WHITELIST_FILE</key>
         <string>${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}</string>
         <key>PAIRING_CODE_TTL</key>
@@ -276,11 +278,12 @@ Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 Environment=TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
 Environment=TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
 Environment=TELEGRAM_WEBHOOK_PORT=${TELEGRAM_WEBHOOK_PORT:-3000}
+Environment=TELEGRAM_HANDLER_TIMEOUT=${TELEGRAM_HANDLER_TIMEOUT:-600000}
 Environment=TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED_USER_IDS:-}
 Environment=OPENCODE_PASSWORD=${OPENCODE_PASSWORD:-}
 Environment=OPENCODE_SERVER_URL=${OPENCODE_SERVER_URL:-http://localhost:4096}
 Environment=OPENCODE_USERNAME=${OPENCODE_USERNAME:-opencode}
-Environment=OPENCODE_REQUEST_TIMEOUT=${OPENCODE_REQUEST_TIMEOUT:-60000}
+Environment=OPENCODE_REQUEST_TIMEOUT=${OPENCODE_REQUEST_TIMEOUT:-600000}
 Environment=WHITELIST_FILE=${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}
 Environment=PAIRING_CODE_TTL=${PAIRING_CODE_TTL:-2}
 Environment=LOG_LEVEL=${LOG_LEVEL:-info}
@@ -404,11 +407,13 @@ cmd_setup() {
 # Telegram Configuration
 TELEGRAM_BOT_TOKEN=$bot_token
 TELEGRAM_MODE=polling
+TELEGRAM_HANDLER_TIMEOUT=600000
 
 # OpenCode Configuration
 OPENCODE_SERVER_URL=http://localhost:4096
 OPENCODE_USERNAME=opencode
 OPENCODE_PASSWORD=$opencode_password
+OPENCODE_REQUEST_TIMEOUT=600000
 
 # Application Configuration
 LOG_LEVEL=info

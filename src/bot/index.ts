@@ -43,7 +43,9 @@ const BOT_COMMANDS = [
 ];
 
 export function createBot(config: PluginConfig['telegram']): Telegraf {
-  const bot = new Telegraf(config.botToken);
+  const bot = new Telegraf(config.botToken, {
+    handlerTimeout: config.handlerTimeout,
+  });
 
   bot.telegram.getMe().then((botInfo: { username?: string }) => {
     logger.info(`Bot started: @${botInfo.username}`);

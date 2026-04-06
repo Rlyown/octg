@@ -46,36 +46,6 @@ export function formatCodeResponse(text: string): string {
   return formatted;
 }
 
-export function formatTelegramHtml(text: string): string {
-  const blocks: string[] = [];
-  const inlines: string[] = [];
-
-  const reserve = (store: string[], value: string, prefix: string): string => {
-    const index = store.push(value) - 1;
-    return `${prefix}${index}__`;
-  };
-
-  let formatted = text.replace(/```(?:\w+)?\n([\s\S]*?)```/g, (_match, code: string) => (
-    reserve(blocks, `<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`, '__TG_HTML_BLOCK_')
-  ));
-
-  formatted = formatted.replace(/`([^`]+)`/g, (_match, code: string) => (
-    reserve(inlines, `<code>${escapeHtml(code)}</code>`, '__TG_HTML_INLINE_')
-  ));
-
-  formatted = escapeHtml(formatted)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/__([^_]+)__/g, '<u>$1</u>')
-    .replace(/\*([^*]+)\*/g, '<i>$1</i>')
-    .replace(/_([^_]+)_/g, '<i>$1</i>');
-
-  formatted = formatted.replace(/__TG_HTML_BLOCK_(\d+)__/g, (_match, index: string) => blocks[Number(index)] || '');
-  formatted = formatted.replace(/__TG_HTML_INLINE_(\d+)__/g, (_match, index: string) => inlines[Number(index)] || '');
-
-  return formatted;
-}
-
 export function formatStatus(params: {
   version: string;
   project: unknown;
@@ -188,14 +158,6 @@ function stringifySummary(value: unknown): string {
   }
 
   return 'Unknown';
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
 }
 
 function formatBytes(bytes: number): string {

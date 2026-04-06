@@ -1,6 +1,6 @@
 import type { Context } from 'telegraf';
 import type { Message, Update } from 'telegraf/types';
-import { formatTelegramHtml } from '../formatters.js';
+import { formatCodeResponse } from '../formatters.js';
 import type { HandlerContext } from './index.js';
 import type { ModelHandler } from './model.js';
 
@@ -162,8 +162,8 @@ export class TaskHandler {
       }
 
       for (const msg of textMessages) {
-        const formatted = formatTelegramHtml(msg.text);
-        await this.hctx.bot.telegram.sendMessage(job.chatId, formatted, { parse_mode: 'HTML' })
+        const formatted = formatCodeResponse(msg.text);
+        await this.hctx.bot.telegram.sendMessage(job.chatId, formatted, { parse_mode: 'Markdown' })
           .catch(() =>
             this.hctx.bot.telegram.sendMessage(
               job.chatId,

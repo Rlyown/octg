@@ -114,10 +114,17 @@ check_opencode_server() {
 
 # Background daemon management
 daemon_name="opencode-telegram"
-LOG_DIR="${HOME}/.local/share/agent-toolkits/logs"
-mkdir -p "$LOG_DIR"
-pid_file="${LOG_DIR}/opencode-telegram.pid"
-log_file="${LOG_DIR}/opencode-telegram.log"
+DEFAULT_LOG_DIR="${SCRIPT_DIR}/logs"
+DEFAULT_LOG_FILE="${DEFAULT_LOG_DIR}/opencode-telegram.log"
+
+refresh_log_paths() {
+    log_file="${OCTG_LOG_PATH:-$DEFAULT_LOG_FILE}"
+    LOG_DIR="$(dirname "$log_file")"
+    mkdir -p "$LOG_DIR"
+    pid_file="${LOG_DIR}/opencode-telegram.pid"
+}
+
+refresh_log_paths
 
 cmd_start() {
     print_header
@@ -202,6 +209,8 @@ cmd_start() {
         <string>${PAIRING_CODE_TTL:-2}</string>
         <key>LOG_LEVEL</key>
         <string>${LOG_LEVEL:-info}</string>
+        <key>OCTG_LOG_PATH</key>
+        <string>${OCTG_LOG_PATH:-${DEFAULT_LOG_FILE}}</string>
         <key>MAX_MESSAGE_LENGTH</key>
         <string>${MAX_MESSAGE_LENGTH:-4000}</string>
         <key>CODE_BLOCK_TIMEOUT</key>
@@ -272,6 +281,8 @@ WorkingDirectory=${SCRIPT_DIR}
 ExecStart=/usr/bin/env node ${SCRIPT_DIR}/dist/standalone.js
 Restart=on-failure
 RestartSec=5
+StandardOutput=append:${log_file}
+StandardError=append:${log_file}
 Environment=TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 Environment=TELEGRAM_MODE=${TELEGRAM_MODE:-polling}
 Environment=TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
@@ -284,6 +295,7 @@ Environment=OPENCODE_REQUEST_TIMEOUT=${OPENCODE_REQUEST_TIMEOUT:-60000}
 Environment=WHITELIST_FILE=${WHITELIST_FILE:-${SCRIPT_DIR}/data/whitelist.json}
 Environment=PAIRING_CODE_TTL=${PAIRING_CODE_TTL:-2}
 Environment=LOG_LEVEL=${LOG_LEVEL:-info}
+Environment=OCTG_LOG_PATH=${OCTG_LOG_PATH:-${DEFAULT_LOG_FILE}}
 Environment=MAX_MESSAGE_LENGTH=${MAX_MESSAGE_LENGTH:-4000}
 Environment=CODE_BLOCK_TIMEOUT=${CODE_BLOCK_TIMEOUT:-120000}
 Environment=ENABLE_SSE=${ENABLE_SSE:-true}
@@ -357,6 +369,8 @@ load_env() {
         WORKSPACE_PATH="$DEFAULT_OPENCODE_WORKDIR"
         export WORKSPACE_PATH
     fi
+
+    refresh_log_paths
 }
 
 # Setup command
@@ -412,6 +426,7 @@ OPENCODE_PASSWORD=$opencode_password
 
 # Application Configuration
 LOG_LEVEL=info
+OCTG_LOG_PATH=${SCRIPT_DIR}/logs/opencode-telegram.log
 MAX_MESSAGE_LENGTH=4000
 CODE_BLOCK_TIMEOUT=120000
 EOF
@@ -424,6 +439,7 @@ EOF
     
     # Create directories
     mkdir -p "${SCRIPT_DIR}/data"
+    mkdir -p "${SCRIPT_DIR}/logs"
     mkdir -p "${SCRIPT_DIR}/shared"
     
     print_success "Directories created"

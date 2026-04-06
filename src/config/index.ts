@@ -24,6 +24,7 @@ function getDefaultConfig(): PluginConfig {
     },
     app: {
       logLevel: 'info',
+      logPath: './logs/opencode-telegram.log',
       maxMessageLength: 4000,
       codeBlockTimeout: 120000,
       whitelistFile: './data/whitelist.json',
@@ -72,6 +73,7 @@ function loadEnvConfig(): Partial<PluginConfig> {
     { env: 'OPENCODE_REQUEST_TIMEOUT', path: 'opencode.requestTimeout', parser: (v) => parseInt(v, 10) },
     // App
     { env: 'LOG_LEVEL', path: 'app.logLevel' },
+    { env: 'OCTG_LOG_PATH', path: 'app.logPath' },
     { env: 'MAX_MESSAGE_LENGTH', path: 'app.maxMessageLength', parser: (v) => parseInt(v, 10) },
     { env: 'CODE_BLOCK_TIMEOUT', path: 'app.codeBlockTimeout', parser: (v) => parseInt(v, 10) },
     { env: 'WHITELIST_FILE', path: 'app.whitelistFile' },
@@ -148,4 +150,3 @@ export function validateConfig(config: PluginConfig): void {
     throw new Error(`Configuration validation failed:\n${errors.join('\n')}`);
   }
 }
-

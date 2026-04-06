@@ -1,5 +1,8 @@
 import { Telegraf } from 'telegraf';
 import type { PluginConfig } from '../types.js';
+import { getLogger } from '../logger.js';
+
+const logger = getLogger('bot');
 
 const BOT_COMMANDS = [
   { command: 'pair', description: '使用配对码授权访问' },
@@ -41,20 +44,20 @@ const BOT_COMMANDS = [
 export function createBot(config: PluginConfig['telegram']): Telegraf {
   const bot = new Telegraf(config.botToken);
 
-  bot.telegram.getMe().then((botInfo) => {
-    console.log(`Bot started: @${botInfo.username}`);
+  bot.telegram.getMe().then((botInfo: { username?: string }) => {
+    logger.info(`Bot started: @${botInfo.username}`);
   });
 
   bot.telegram.setMyCommands(BOT_COMMANDS).then(() => {
-    console.log('Bot commands menu configured');
-  }).catch((err) => {
-    console.warn('Failed to set bot commands:', err.message);
+    logger.info('Bot commands menu configured');
+  }).catch((err: { message?: string }) => {
+    logger.warn('Failed to set bot commands:', err.message);
   });
 
   return bot;
 }
 
 export async function setupPolling(bot: Telegraf): Promise<void> {
-  console.log('Starting bot in polling mode...');
+  logger.info('Starting bot in polling mode...');
   await bot.launch();
 }

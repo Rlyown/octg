@@ -7,6 +7,7 @@ import type { PluginConfig, RequestOverrides, TelegramSession } from '../types.j
 import { WhitelistManager } from '../auth/whitelist.js';
 import { SSEClient } from '../opencode/sse-client.js';
 import { PermissionHandler } from '../opencode/permission-handler.js';
+import { getLogger } from '../logger.js';
 import {
   formatCodeResponse,
   formatFileList,
@@ -33,6 +34,7 @@ export class BotHandlers {
   private config: PluginConfig;
   private sseClient: SSEClient | null = null;
   private permissionHandler: PermissionHandler;
+  private logger = getLogger('chat');
 
   constructor(
     bot: Telegraf,
@@ -130,7 +132,7 @@ export class BotHandlers {
         `🤖 AI 回复:\n\n${text.slice(0, 500)}${text.length > 500 ? '...' : ''}`
       );
     } catch (error) {
-      console.error('Failed to send SSE message to Telegram:', error);
+      this.logger.error('Failed to send SSE message to Telegram:', error);
     }
   }
 
@@ -612,11 +614,11 @@ AI 设置：
 
     let session = this.sessions.get(userId);
     if (!session) {
-      console.log(`[octg][chat] user=${userId} stage=session_lookup result=miss`);
+      this.logger.debug(`user=${userId} stage=session_lookup result=miss`);
       session = await this.createSessionFromMessage(ctx, message.text);
       if (!session) return;
     } else {
-      console.log(`[octg][chat] user=${userId} stage=session_lookup result=hit session=${this.shortId(session.openCodeSessionId)}`);
+      this.logger.debug(`user=${userId} stage=session_lookup result=hit session=${this.shortId(session.openCodeSessionId)}`);
       this.sessions.updateActivity(userId);
     }
 
@@ -624,14 +626,14 @@ AI 设置：
 
     try {
       const overrideStartedAt = Date.now();
-      console.log(`[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=overrides start`);
+      this.logger.debug(`user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=overrides start`);
       const overrides = await this.getOverrides(session);
-      console.log(
-        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=overrides ok duration=${Date.now() - overrideStartedAt}ms overrides=${this.summarizeOverrides(overrides)}`
+      this.logger.debug(
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=overrides ok duration=${Date.now() - overrideStartedAt}ms overrides=${this.summarizeOverrides(overrides)}`
       );
 
-      console.log(
-        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request start textLength=${message.text.length}`
+      this.logger.debug(
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request start textLength=${message.text.length}`
       );
       const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
@@ -639,8 +641,8 @@ AI 设置：
         overrides
       );
 
-      console.log(
-        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request ok duration=${Date.now() - requestStartedAt}ms parts=${response.parts.length}`
+      this.logger.debug(
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request ok duration=${Date.now() - requestStartedAt}ms parts=${response.parts.length}`
       );
 
       await ctx.deleteMessage(processingMsg.message_id);
@@ -658,8 +660,8 @@ AI 设置：
       }
     } catch (error) {
       const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      console.error(
-        `[octg][chat] user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request failed duration=${Date.now() - requestStartedAt}ms error=${messageText}`
+      this.logger.error(
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request failed duration=${Date.now() - requestStartedAt}ms error=${messageText}`
       );
       await ctx.reply(`❌ 错误: ${error}`);
     }
@@ -959,7 +961,7 @@ AI 设置：
     const startedAt = Date.now();
 
     try {
-      console.log(`[octg][chat] user=${userId} stage=session_create start title=${JSON.stringify(title)}`);
+      this.logger.info(`user=${userId} stage=session_create start title=${JSON.stringify(title)}`);
       const openCodeSession = await this.opencode.createSession(title);
 
       const session: TelegramSession = {
@@ -975,14 +977,14 @@ AI 设置：
       };
 
       this.sessions.set(session);
-      console.log(
-        `[octg][chat] user=${userId} stage=session_create ok duration=${Date.now() - startedAt}ms session=${this.shortId(openCodeSession.id)}`
+      this.logger.info(
+        `user=${userId} stage=session_create ok duration=${Date.now() - startedAt}ms session=${this.shortId(openCodeSession.id)}`
       );
       return session;
     } catch (error) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      console.error(
-        `[octg][chat] user=${userId} stage=session_create failed duration=${Date.now() - startedAt}ms error=${message}`
+      this.logger.error(
+        `user=${userId} stage=session_create failed duration=${Date.now() - startedAt}ms error=${message}`
       );
       await ctx.reply(`创建会话失败: ${error}`);
       return undefined;
@@ -1200,8 +1202,10 @@ AI 设置：
   }
 
   private handleError(err: unknown, ctx: Context<Update>): void {
-    console.error('Bot error:', err);
-    ctx.reply('发生错误，请稍后重试').catch(console.error);
+    this.logger.error('Bot error:', err);
+    ctx.reply('发生错误，请稍后重试').catch((error: unknown) => {
+      this.logger.error(error);
+    });
   }
 
   private async handleHistory(ctx: Context<Update.MessageUpdate>): Promise<void> {

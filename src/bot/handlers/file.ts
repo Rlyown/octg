@@ -15,7 +15,7 @@ export class FileHandler {
     const path = args[0] || '';
 
     try {
-      const files = await this.hctx.opencode.listFiles(path);
+      const files = await this.hctx.opencode.listFiles(path, { directory: session.directory });
       await ctx.reply(formatFileList(files, path));
     } catch (error) {
       await ctx.reply(`❌ 无法列出文件: ${error}`);
@@ -36,7 +36,7 @@ export class FileHandler {
     }
 
     try {
-      const file = await this.hctx.opencode.readFile(path);
+      const file = await this.hctx.opencode.readFile(path, { directory: session.directory });
 
       let content = file.content;
       if (content.length > this.hctx.config.app.maxMessageLength - 100) {
@@ -64,7 +64,7 @@ export class FileHandler {
     const processingMsg = await ctx.reply(`🔍 搜索: ${pattern}...`);
 
     try {
-      const results = await this.hctx.opencode.findText(pattern);
+      const results = await this.hctx.opencode.findText(pattern, { directory: session.directory });
       await ctx.deleteMessage(processingMsg.message_id);
 
       if (results.length === 0) {
@@ -98,7 +98,7 @@ export class FileHandler {
     }
 
     try {
-      const results = await this.hctx.opencode.findFile(query);
+      const results = await this.hctx.opencode.findFile(query, { directory: session.directory });
       if (results.length === 0) {
         await ctx.reply('未找到匹配文件');
         return;
@@ -113,8 +113,11 @@ export class FileHandler {
   }
 
   async handleGitStatus(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    const session = await this.hctx.ensureSession(ctx);
+    if (!session) return;
+
     try {
-      const files = await this.hctx.opencode.getFileStatus();
+      const files = await this.hctx.opencode.getFileStatus({ directory: session.directory });
       if (!Array.isArray(files) || files.length === 0) {
         await ctx.reply('工作区干净，没有变更');
         return;
@@ -140,6 +143,9 @@ export class FileHandler {
   }
 
   async handleSymbol(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    const session = await this.hctx.ensureSession(ctx);
+    if (!session) return;
+
     const message = ctx.message as Message.TextMessage;
     const query = message.text.replace('/symbol', '').trim();
 
@@ -149,7 +155,7 @@ export class FileHandler {
     }
 
     try {
-      const symbols = await this.hctx.opencode.findSymbol(query);
+      const symbols = await this.hctx.opencode.findSymbol(query, { directory: session.directory });
       if (!Array.isArray(symbols) || symbols.length === 0) {
         await ctx.reply('未找到匹配符号');
         return;
@@ -179,7 +185,8 @@ export class FileHandler {
       const success = await this.hctx.opencode.initSession(
         session.openCodeSessionId,
         session.preferredModel?.split('/')[0],
-        session.preferredModel?.split('/')[1]
+        session.preferredModel?.split('/')[1],
+        { directory: session.directory }
       );
       await ctx.deleteMessage(processingMsg.message_id);
 
@@ -195,6 +202,9 @@ export class FileHandler {
   }
 
   async handleTools(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    const session = await this.hctx.ensureSession(ctx);
+    if (!session) return;
+
     try {
       const tools = await this.hctx.opencode.listToolIds();
       if (!tools || typeof tools !== 'object') {

@@ -43,24 +43,32 @@ async function main() {
   const ocSessions = await opencode.listSessions();
   if (ocSessions.length > 0) {
     const first = ocSessions[0];
+    const firstDetail = await opencode.getSession(first.id).catch(() => first);
     sessionManager.set({
       telegramChatId: '',
-      openCodeSessionId: first.id,
-      openCodeSessionTitle: first.title,
-      createdAt: new Date(first.time.created),
-      lastActivity: new Date(first.time.updated),
+      openCodeSessionId: firstDetail.id,
+      openCodeSessionTitle: firstDetail.title,
+      directory: firstDetail.directory,
+      createdAt: new Date(firstDetail.time.created),
+      lastActivity: new Date(firstDetail.time.updated),
     });
-    console.log(`✅ Auto-selected session: ${first.title || first.id.slice(0, 12)}\n`);
+    console.log(
+      `✅ Auto-selected session: ${firstDetail.title || firstDetail.id.slice(0, 12)}${firstDetail.directory ? ` (${firstDetail.directory})` : ''}\n`
+    );
   } else {
     const created = await opencode.createSession();
+    const createdDetail = await opencode.getSession(created.id).catch(() => created);
     sessionManager.set({
       telegramChatId: '',
-      openCodeSessionId: created.id,
-      openCodeSessionTitle: created.title,
-      createdAt: new Date(created.time.created),
-      lastActivity: new Date(created.time.updated),
+      openCodeSessionId: createdDetail.id,
+      openCodeSessionTitle: createdDetail.title,
+      directory: createdDetail.directory,
+      createdAt: new Date(createdDetail.time.created),
+      lastActivity: new Date(createdDetail.time.updated),
     });
-    console.log(`✅ No sessions found, created new session: ${created.id.slice(0, 12)}\n`);
+    console.log(
+      `✅ No sessions found, created new session: ${createdDetail.id.slice(0, 12)}${createdDetail.directory ? ` (${createdDetail.directory})` : ''}\n`
+    );
   }
 
   // Create Telegram bot

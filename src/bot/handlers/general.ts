@@ -17,11 +17,12 @@ export class GeneralHandler {
 ✅ 管理任务
 🎮 控制 TUI
 
-发送任意消息创建新会话，或使用 /new [标题] 手动创建。
+使用 /new <绝对路径> [标题] 创建并绑定会话目录。
 
 可用命令：
 /sessions - 查看/切换/删除会话
-/new [title] - 创建新会话
+/new <abs_path> [title] - 创建新会话并绑定目录
+/remove <序号或id> - 删除会话
 /rename <名称> - 重命名会话
 /cwd - 查看当前目录
 /projects - 列出项目
@@ -56,7 +57,8 @@ export class GeneralHandler {
 /providers - 列出模型提供商
 
 会话管理：
-/new [title] - 创建新会话
+/new <abs_path> [title] - 创建新会话并绑定目录
+/remove <序号或id> - 删除会话
 /sessions - 查看/切换/删除会话
 /rename <名称> - 重命名会话
 /fork [id] - 分叉会话
@@ -94,8 +96,7 @@ AI 设置：
 工具：
 /tools - 列出可用工具
 
-提示：直接发送消息可以与 AI 对话`,
-      { parse_mode: 'Markdown' }
+提示：直接发送消息可以与 AI 对话`
     );
   }
 
@@ -104,7 +105,7 @@ AI 设置：
     if (!session) return;
 
     try {
-      const path = await this.hctx.opencode.getPath();
+      const path = await this.hctx.opencode.getPath({ directory: session.directory });
       const text = typeof path === 'string' ? path : JSON.stringify(path);
       await ctx.reply(`📂 当前工作目录\n\n${text}`);
     } catch (error) {
@@ -117,7 +118,9 @@ AI 设置：
     if (!session) return;
 
     try {
-      const todos = await this.hctx.opencode.getTodos(session.openCodeSessionId);
+      const todos = await this.hctx.opencode.getTodos(session.openCodeSessionId, {
+        directory: session.directory,
+      });
       const { formatTodos } = await import('../formatters.js');
       await ctx.reply(formatTodos(todos));
     } catch (error) {
@@ -134,7 +137,9 @@ AI 设置：
     const limit = args[0] ? parseInt(args[0], 10) : 20;
 
     try {
-      const messages = await this.hctx.opencode.listMessages(session.openCodeSessionId, limit);
+      const messages = await this.hctx.opencode.listMessages(session.openCodeSessionId, limit, {
+        directory: session.directory,
+      });
       if (messages.length === 0) {
         await ctx.reply('暂无历史消息');
         return;

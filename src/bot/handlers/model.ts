@@ -5,6 +5,11 @@ import type { HandlerContext } from './index.js';
 
 export class ModelHandler {
   private static readonly FALLBACK_MODEL = 'openai/gpt-5.4';
+  private static readonly AGENT_MODE_LABELS: Record<string, string> = {
+    primary: 'primary',
+    subagent: 'subagent',
+    all: 'all',
+  };
 
   constructor(private hctx: HandlerContext) {}
 
@@ -80,8 +85,12 @@ export class ModelHandler {
 
     if (normalized === 'list') {
       try {
-        const agents = await this.hctx.opencode.listAgents();
-        const lines = agents.map(a => `• ${a.name}${a.description ? ` - ${a.description}` : ''}`);
+        const agents = (await this.hctx.opencode.listAgents()).filter((agent) => !agent.hidden);
+        const lines = agents.map((agent) => {
+          const mode = ModelHandler.AGENT_MODE_LABELS[agent.mode || 'all'] || agent.mode || 'unknown';
+          const description = agent.description ? ` - ${agent.description}` : '';
+          return `• ${agent.name} (${mode})${description}`;
+        });
         await ctx.reply(`🤖 可用 Agents (${agents.length})\n\n${lines.join('\n')}`);
       } catch (error) {
         await ctx.reply(`❌ 获取 agent 列表失败: ${error}`);
@@ -96,9 +105,30 @@ export class ModelHandler {
       return;
     }
 
-    session.preferredAgent = normalized;
+    await this.setPreferredAgent(ctx, session, normalized);
+  }
+
+  async handleNamedAgent(ctx: Context<Update.MessageUpdate>, agentName: string): Promise<void> {
+    const session = await this.hctx.ensureSession(ctx);
+    if (!session) return;
+
+    await this.setPreferredAgent(
+      ctx,
+      session,
+      agentName,
+      `✅ 已切换到 ${agentName} agent\n\n仅对当前 octg 进程临时生效；如果 octg 重启，需要重新执行 /${agentName}。`,
+    );
+  }
+
+  private async setPreferredAgent(
+    ctx: Context<Update.MessageUpdate>,
+    session: TelegramSession,
+    agentName: string,
+    successMessage?: string,
+  ): Promise<void> {
+    session.preferredAgent = agentName;
     this.hctx.sessions.set(session);
-    await ctx.reply(`✅ 已设置 agent\n\n${normalized}`);
+    await ctx.reply(successMessage || `✅ 已设置 agent\n\n${agentName}`);
   }
 
   async getOverrides(session: TelegramSession): Promise<RequestOverrides> {

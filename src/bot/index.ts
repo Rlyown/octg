@@ -14,6 +14,8 @@ const BOT_COMMANDS = [
   { command: 'sessions', description: '查看、切换、删除或翻页浏览会话' },
   { command: 'model', description: '查看、列出或设置当前模型' },
   { command: 'agents', description: '查看、列出或设置当前 agent' },
+  { command: 'plan', description: '临时切换到 plan agent' },
+  { command: 'build', description: '临时切换到 build agent' },
   { command: 'ls', description: '列出目录内容 /ls [path]' },
   { command: 'cat', description: '读取文件内容 /cat <file>' },
   { command: 'task', description: '提交异步任务 /task <描述>' },

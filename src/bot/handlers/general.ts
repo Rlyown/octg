@@ -28,6 +28,8 @@ export class GeneralHandler {
 /projects - 列出项目
 /model - 查看/设置模型
 /agents - 查看/设置 agent
+/plan - 临时切换到 plan agent
+/build - 临时切换到 build agent
 /task <描述> - 提交异步任务
 /ls [路径] - 列出文件
 /cat <文件> - 查看文件
@@ -75,7 +77,9 @@ AI 设置：
 /model - 查看/设置模型
 /model list - 列出模型
 /agents - 查看/设置 agent
-/agents list - 列出 agent
+/agents list - 列出可见 agent（含 primary/subagent）
+/plan - 临时切换到 plan agent
+/build - 临时切换到 build agent
 
 文件操作：
 /ls [path] - 列出文件
@@ -96,7 +100,7 @@ AI 设置：
 工具：
 /tools - 列出可用工具
 
-提示：直接发送消息可以与 AI 对话`
+提示：/plan 和 /build 只在当前 octg 进程内临时生效，重启后会丢失；直接发送消息可以与 AI 对话`
     );
   }
 

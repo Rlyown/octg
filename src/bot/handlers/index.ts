@@ -27,7 +27,7 @@ export interface HandlerContext {
 export class BotHandlers {
   private static readonly LOCAL_COMMANDS = new Set([
     'pair', 'start', 'help', 'status', 'new', 'remove', 'sessions', 'cwd',
-    'model', 'agents', 'ls', 'cat', 'task', 'shell', 'todos',
+    'model', 'agents', 'plan', 'build', 'ls', 'cat', 'task', 'shell', 'todos',
     'history', 'search', 'findfile', 'rename', 'fork', 'abort',
     'share', 'unshare', 'diff', 'summarize', 'projects', 'commands',
     'config', 'providers', 'status_all', 'children',
@@ -159,6 +159,8 @@ export class BotHandlers {
     this.bot.command('cwd', this.withWhitelist(this.generalHandler.handleCwd.bind(this.generalHandler)));
     this.bot.command('model', this.withWhitelist(this.modelHandler.handleModel.bind(this.modelHandler)));
     this.bot.command('agents', this.withWhitelist(this.modelHandler.handleAgents.bind(this.modelHandler)));
+    this.bot.command('plan', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'plan')));
+    this.bot.command('build', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'build')));
     this.bot.action(/^sessions:(\d+)(?::(.*))?$/, this.sessionHandler.handleSessionsPage.bind(this.sessionHandler));
 
     // File operations

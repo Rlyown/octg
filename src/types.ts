@@ -178,6 +178,9 @@ export interface HealthResponse {
 export interface Agent {
   name: string;
   description?: string;
+  mode?: 'primary' | 'subagent' | 'all';
+  hidden?: boolean;
+  native?: boolean;
   slug?: string;
 }
 

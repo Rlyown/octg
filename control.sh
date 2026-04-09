@@ -93,15 +93,18 @@ get_opencode_workdir() {
 
 check_opencode_server() {
     print_info "Checking OpenCode server..."
-    if [ -n "${OPENCODE_PASSWORD:-}" ] && curl -sf -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health" > /dev/null 2>&1; then
+    local health_url="${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health"
+    local curl_args=(--connect-timeout 2 --max-time 5 -sf)
+
+    if [ -n "${OPENCODE_PASSWORD:-}" ] && curl "${curl_args[@]}" -u "opencode:${OPENCODE_PASSWORD}" "$health_url" > /dev/null 2>&1; then
         local health version
-        health=$(curl -s -u "opencode:${OPENCODE_PASSWORD}" "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
+        health=$(curl --connect-timeout 2 --max-time 5 -s -u "opencode:${OPENCODE_PASSWORD}" "$health_url" 2>/dev/null)
         version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
         print_success "OpenCode server running (v${version})"
         return 0
-    elif curl -sf "${OPENCODE_SERVER_URL:-http://localhost:4096}/global/health" > /dev/null 2>&1; then
+    elif curl "${curl_args[@]}" "$health_url" > /dev/null 2>&1; then
         local health version
-        health=$(curl -s "${OPENCODE_SERVER_URL}/global/health" 2>/dev/null)
+        health=$(curl --connect-timeout 2 --max-time 5 -s "$health_url" 2>/dev/null)
         version=$(echo "$health" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
         print_success "OpenCode server running (v${version})"
         return 0

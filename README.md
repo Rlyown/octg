@@ -57,7 +57,26 @@ as the server working directory. If unset, it defaults to `~/GitProject`.
 
 ### Host Deployment
 
-**Terminal 1 - Start OpenCode Server:**
+**Using the OpenCode Server Control Script (Recommended):**
+
+```bash
+# Start OpenCode server in background
+./opencode-server.sh start
+
+# Check status
+./opencode-server.sh status
+
+# View logs
+./opencode-server.sh logs
+
+# Stop server
+./opencode-server.sh stop
+
+# Or run in foreground (Ctrl+C to stop)
+./opencode-server.sh fg
+```
+
+**Manual Method - Terminal 1 - Start OpenCode Server:**
 
 ```bash
 cd ~/GitProject
@@ -78,7 +97,7 @@ export OPENCODE_PASSWORD="your-password"
 npm start
 ```
 
-Using the provided control script:
+Using the Telegram plugin control script:
 
 ```bash
 # Interactive first-time setup
@@ -95,10 +114,19 @@ npm start
 Other useful commands:
 
 ```bash
-./control.sh status
-./control.sh logs
-./control.sh restart
-./control.sh stop
+# OpenCode Server Control
+./opencode-server.sh start     # Start OpenCode server in background
+./opencode-server.sh stop      # Stop OpenCode server
+./opencode-server.sh status    # Check OpenCode server status
+./opencode-server.sh restart   # Restart OpenCode server
+./opencode-server.sh logs      # View OpenCode server logs
+./opencode-server.sh fg        # Run OpenCode server in foreground
+
+# Telegram Plugin Control
+./control.sh status            # Check Telegram bot status
+./control.sh logs              # View Telegram bot logs
+./control.sh restart           # Restart Telegram bot
+./control.sh stop              # Stop Telegram bot
 ```
 
 ## Commands
@@ -130,16 +158,20 @@ Other useful commands:
 
 ### Environment Variables
 
-| Variable                    | Description                      | Default                 |
-| --------------------------- | -------------------------------- | ----------------------- |
-| `TELEGRAM_BOT_TOKEN`        | Bot token from @BotFather        | Required                |
-| `TELEGRAM_MODE`             | `polling` or `webhook`           | `polling`               |
-| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated user IDs         | (allow all)             |
-| `OPENCODE_SERVER_URL`       | OpenCode HTTP URL                | `http://localhost:4096` |
-| `OPENCODE_PASSWORD`         | Server password                  | Required                |
-| `SESSION_STORAGE`           | `memory` or `file`               | `memory`                |
-| `WORKSPACE_PATH`            | Local workspace path for context | `./workspace`           |
-| `CONFIG_PATH`               | OpenCode config path             | `~/.config/opencode`    |
+| Variable                    | Description                        | Default                 |
+| --------------------------- | ---------------------------------- | ----------------------- |
+| `TELEGRAM_BOT_TOKEN`        | Bot token from @BotFather          | Required                |
+| `TELEGRAM_MODE`             | `polling` or `webhook`             | `polling`               |
+| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated user IDs           | (allow all)             |
+| `OPENCODE_SERVER_URL`       | OpenCode HTTP URL                  | `http://localhost:4096` |
+| `OPENCODE_PASSWORD`         | Server password                    | Required                |
+| `SESSION_STORAGE`           | `memory` or `file`                 | `memory`                |
+| `WORKSPACE_PATH`            | Local workspace path for context   | `./workspace`           |
+| `CONFIG_PATH`               | OpenCode config path               | `~/.config/opencode`    |
+| `DATA_PATH`                 | OpenCode session data path         | `~/.local/share/opencode` |
+| `OPENCODE_PORT`             | OpenCode server port               | `4096`                  |
+| `OPENCODE_HOSTNAME`         | OpenCode server hostname           | `127.0.0.1`             |
+| `OPENCODE_CORS`             | CORS origin for web clients        | (disabled)              |
 
 ### Config File
 

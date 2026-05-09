@@ -183,7 +183,7 @@ export class ModelHandler {
 
     return {
       label: ModelHandler.FALLBACK_MODEL,
-      source: '回退默认',
+      source: 'OpenCode 默认',
     };
   }
 

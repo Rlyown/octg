@@ -16,12 +16,14 @@ export class SessionHandler {
   ) {}
 
   async handleNewSession(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    this.logger.info('handleNewSession called');
     const message = ctx.message as Message.TextMessage;
     const args = message.text.split(' ').slice(1);
     await this.createSessionWithDirectory(ctx, args);
   }
 
   async handleRemoveSessionCommand(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    this.logger.info('handleRemoveSessionCommand called');
     const message = ctx.message as Message.TextMessage;
     const target = message.text.split(' ').slice(1).join(' ').trim();
 

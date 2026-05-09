@@ -2,6 +2,7 @@ import type { Context } from 'telegraf';
 import type { Message, Update } from 'telegraf/types';
 import type { RequestOverrides, TelegramSession } from '../../types.js';
 import type { HandlerContext } from './index.js';
+import { getLogger } from '../../logger.js';
 
 export class ModelHandler {
   private static readonly FALLBACK_MODEL = 'openai/gpt-5.4';
@@ -10,6 +11,7 @@ export class ModelHandler {
     subagent: 'subagent',
     all: 'all',
   };
+  private logger = getLogger('model');
 
   constructor(private hctx: HandlerContext) {}
 
@@ -21,8 +23,11 @@ export class ModelHandler {
     const args = message.text.split(' ').slice(1);
     const normalized = args.join(' ').trim();
 
+    this.logger.info(`handleModel called, args: "${normalized}"`);
+
     if (!normalized) {
       const resolvedModel = await this.getResolvedModelInfo(session);
+      this.logger.info(`showing current model: ${resolvedModel}`);
 
       await ctx.reply(
         `🧠 当前模型\n\n` +
@@ -36,21 +41,26 @@ export class ModelHandler {
     }
 
     if (args[0] === 'list') {
+      this.logger.info('listing available models');
       try {
         const config = await this.hctx.opencode.getConfigProviders();
+        this.logger.info(`found ${config.providers.length} providers`);
         const lines = config.providers.map(p => {
           const models = p.models.slice(0, 5).join(', ');
           const more = p.models.length > 5 ? `... (+${p.models.length - 5})` : '';
           return `• ${p.provider}: ${models}${more}`;
         });
         await ctx.reply(`🧠 可用模型 (${config.providers.length} providers)\n\n${lines.join('\n')}`);
+        this.logger.info('model list sent successfully');
       } catch (error) {
+        this.logger.error('failed to get model list:', error);
         await ctx.reply(`❌ 获取模型列表失败: ${error}`);
       }
       return;
     }
 
     if (normalized === 'clear') {
+      this.logger.info('clearing model override');
       delete session.preferredModel;
       this.hctx.sessions.set(session);
       await ctx.reply(`✅ 已清除模型覆盖\n\n后续消息将优先使用 OpenCode 默认模型；如果服务端默认无法解析，则回退到 ${ModelHandler.FALLBACK_MODEL}`);
@@ -58,7 +68,9 @@ export class ModelHandler {
     }
 
     session.preferredModel = normalized;
+    this.logger.info(`model set to: ${normalized}`);
     this.hctx.sessions.set(session);
+    this.logger.info('model saved to session');
     await ctx.reply(`✅ 已设置模型\n\n${normalized}`);
   }
 

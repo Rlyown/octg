@@ -2,11 +2,15 @@ import type { Context } from 'telegraf';
 import type { Message, Update } from 'telegraf/types';
 import { formatFileList } from '../formatters.js';
 import type { HandlerContext } from './index.js';
+import { getLogger } from '../../logger.js';
 
 export class FileHandler {
+  private logger = getLogger('file');
+
   constructor(private hctx: HandlerContext) {}
 
   async handleListFiles(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    this.logger.info('handleListFiles called');
     const session = await this.hctx.ensureSession(ctx);
     if (!session) return;
 

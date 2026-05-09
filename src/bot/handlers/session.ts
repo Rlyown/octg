@@ -5,8 +5,11 @@ import type { TelegramSession } from '../../types.js';
 import { formatSessionOverview, formatStatus } from '../formatters.js';
 import type { HandlerContext } from './index.js';
 import type { ModelHandler } from './model.js';
+import { getLogger } from '../../logger.js';
 
 export class SessionHandler {
+  private logger = getLogger('session');
+
   constructor(
     private hctx: HandlerContext,
     private modelHandler: ModelHandler

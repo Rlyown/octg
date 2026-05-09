@@ -1,11 +1,15 @@
 import type { Context } from 'telegraf';
 import type { Update } from 'telegraf/types';
 import type { HandlerContext } from './index.js';
+import { getLogger } from '../../logger.js';
 
 export class GeneralHandler {
+  private logger = getLogger('general');
+
   constructor(private hctx: HandlerContext) {}
 
   async handleStart(ctx: Context<Update.MessageUpdate>): Promise<void> {
+    this.logger.info('handleStart called');
     await ctx.reply(
       `👋 你好 ${ctx.from?.first_name || '用户'}!
 

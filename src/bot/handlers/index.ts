@@ -384,7 +384,24 @@ export class BotHandlers {
       this.logger.error(
         `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request failed duration=${Date.now() - requestStartedAt}ms error=${messageText}`
       );
-      await ctx.reply(`❌ 错误: ${error}`);
+
+      const isTimeout = error instanceof Error && (
+        error.name === 'AbortError' ||
+        error.message.includes('aborted') ||
+        error.message.includes('timeout')
+      );
+
+      if (isTimeout) {
+        this.logger.info(`user=${userId} session=${this.shortId(session.openCodeSessionId)} aborting session after timeout`);
+        await this.opencode.abortSession(session.openCodeSessionId, { directory: session.directory }).catch(() => {});
+        await ctx.reply(
+          `⏱️ 请求超时\n\n` +
+          `OpenCode 处理时间过长，已自动中止。\n` +
+          `你可以继续发送新消息。`
+        );
+      } else {
+        await ctx.reply(`❌ 错误: ${messageText}`);
+      }
     }
   }
 

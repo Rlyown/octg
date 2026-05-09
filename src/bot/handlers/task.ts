@@ -69,7 +69,7 @@ export class TaskHandler {
       });
 
       const summarized = this.modelHandler.parseModelOverride(
-        (await this.modelHandler.getResolvedModelInfo(session)).label
+        await this.modelHandler.getResolvedModelInfo(session)
       );
       const overrideSummary = summarized
         ? `model=${summarized.providerID}/${summarized.modelID}`

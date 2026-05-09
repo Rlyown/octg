@@ -26,8 +26,7 @@ export class ModelHandler {
 
       await ctx.reply(
         `🧠 当前模型\n\n` +
-        `${resolvedModel.label}\n` +
-        `来源：${resolvedModel.source}\n\n` +
+        `${resolvedModel}\n\n` +
         `用法：\n` +
         `/model <provider/model> 设置模型\n` +
         `/model clear 清除模型覆盖\n` +
@@ -135,7 +134,7 @@ export class ModelHandler {
     const overrides: RequestOverrides = {};
 
     const resolvedModel = await this.getResolvedModelInfo(session);
-    const modelOverride = this.parseModelOverride(resolvedModel.label);
+    const modelOverride = this.parseModelOverride(resolvedModel);
     if (modelOverride) {
       overrides.model = modelOverride;
     }
@@ -163,28 +162,19 @@ export class ModelHandler {
     };
   }
 
-  async getResolvedModelInfo(session: TelegramSession): Promise<{ label: string; source: string }> {
+  async getResolvedModelInfo(session: TelegramSession): Promise<string> {
     if (session.preferredModel) {
-      return {
-        label: session.preferredModel,
-        source: '本地覆盖',
-      };
+      return session.preferredModel;
     }
 
     const providers = await this.hctx.opencode.getConfigProviders().catch(() => null);
     const configuredDefault = this.getConfiguredDefaultModelLabel(providers);
 
     if (configuredDefault) {
-      return {
-        label: configuredDefault,
-        source: 'OpenCode 默认',
-      };
+      return configuredDefault;
     }
 
-    return {
-      label: ModelHandler.FALLBACK_MODEL,
-      source: 'OpenCode 默认',
-    };
+    return ModelHandler.FALLBACK_MODEL;
   }
 
   getConfiguredDefaultModelLabel(config: { default?: unknown } | null): string | undefined {

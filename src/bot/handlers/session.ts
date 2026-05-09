@@ -377,7 +377,7 @@ export class SessionHandler {
           sessionId: session.openCodeSessionId,
           sessionTitle: liveSession?.title || session.openCodeSessionTitle,
           overrides: await this.modelHandler.getOverrides(session),
-          modelLabel: resolvedModel.label,
+          modelLabel: resolvedModel,
           agentLabel: session.preferredAgent || 'OpenCode default',
         })
       );

@@ -620,6 +620,7 @@ OPENCODE_PASSWORD=${opencode_password}
 OPENCODE_REQUEST_TIMEOUT=600000
 
 LOG_LEVEL=info
+OCTG_SESSION_FILE=${SCRIPT_DIR}/instances/${name}/session.json
 OCTG_LOG_PATH=${bot_log_path}
 WHITELIST_FILE=${whitelist_file}
 PAIRING_CODE_TTL=2

@@ -162,6 +162,7 @@ export class BotHandlers {
     this.bot.command('plan', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'plan')));
     this.bot.command('build', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'build')));
     this.bot.action(/^sessions:(\d+)(?::(.*))?$/, this.sessionHandler.handleSessionsPage.bind(this.sessionHandler));
+    this.bot.action(/^models:(page:\d+|set:\d+:\d+|noop)$/, this.modelHandler.handleModelAction.bind(this.modelHandler));
 
     // File operations
     this.bot.command('ls', this.withWhitelist(this.fileHandler.handleListFiles.bind(this.fileHandler)));

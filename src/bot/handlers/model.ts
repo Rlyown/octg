@@ -34,7 +34,6 @@ export class ModelHandler {
         `${resolvedModel}\n\n` +
         `用法：\n` +
         `/model <provider/model> 设置模型\n` +
-        `/model <index> 按编号设置模型\n` +
         `/model clear 清除模型覆盖\n` +
         `/model list 列出可用模型`
       );
@@ -47,13 +46,7 @@ export class ModelHandler {
         const config = await this.hctx.opencode.getConfigProviders();
         const indexedModels = this.buildIndexedModels(config);
         this.logger.info(`found ${config.providers.length} providers and ${indexedModels.length} models`);
-        const lines = config.providers.map((provider) => {
-          const providerModels = indexedModels.filter((entry) => entry.provider === provider.provider);
-          const models = providerModels.slice(0, 5).map((entry) => `${entry.index}. ${entry.model}`).join(', ');
-          const more = providerModels.length > 5 ? `... (+${providerModels.length - 5})` : '';
-          return `• ${provider.provider}: ${models}${more}`;
-        });
-        await ctx.reply(`🧠 可用模型 (${config.providers.length} providers)\n\n${lines.join('\n')}`);
+        await this.renderModelList(ctx, indexedModels, session, 1);
         this.logger.info('model list sent successfully');
       } catch (error) {
         this.logger.error('failed to get model list:', error);
@@ -67,20 +60,6 @@ export class ModelHandler {
       delete session.preferredModel;
       this.hctx.sessions.set(session);
       await ctx.reply(`✅ 已清除模型覆盖\n\n后续消息将优先使用 OpenCode 默认模型；如果服务端默认无法解析，则回退到 ${ModelHandler.FALLBACK_MODEL}`);
-      return;
-    }
-
-    const selectedByIndex = await this.resolveModelByIndex(normalized);
-    if (selectedByIndex) {
-      session.preferredModel = selectedByIndex.label;
-      this.logger.info(`model set by index ${normalized}: ${selectedByIndex.label}`);
-      this.hctx.sessions.set(session);
-      await ctx.reply(`✅ 已按编号设置模型\n\n${normalized} → ${selectedByIndex.label}`);
-      return;
-    }
-
-    if (/^\d+$/.test(normalized)) {
-      await ctx.reply(`❌ 模型编号 ${normalized} 不存在\n\n请先执行 /model list 查看可用编号。`);
       return;
     }
 
@@ -146,6 +125,69 @@ export class ModelHandler {
       agentName,
       `✅ 已切换到 ${agentName} agent\n\n仅对当前 octg 进程临时生效；如果 octg 重启，需要重新执行 /${agentName}。`,
     );
+  }
+
+  async handleModelAction(ctx: Context<Update.CallbackQueryUpdate>): Promise<void> {
+    const callbackData = this.getCallbackData(ctx);
+    if (!callbackData) {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    const pageMatch = callbackData.match(/^models:page:(\d+)$/);
+    if (pageMatch) {
+      const page = Number.parseInt(pageMatch[1], 10);
+      const session = this.getCurrentSession();
+      if (!session) {
+        await ctx.answerCbQuery('当前没有可用会话');
+        return;
+      }
+
+      try {
+        const config = await this.hctx.opencode.getConfigProviders();
+        await this.renderModelList(ctx, this.buildIndexedModels(config), session, page);
+        await ctx.answerCbQuery();
+      } catch (error) {
+        await ctx.answerCbQuery('加载模型失败');
+      }
+      return;
+    }
+
+    if (callbackData === 'models:noop') {
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    const selectMatch = callbackData.match(/^models:set:(\d+):(\d+)$/);
+    if (!selectMatch) {
+      await ctx.answerCbQuery('无效的模型请求');
+      return;
+    }
+
+    const index = Number.parseInt(selectMatch[1], 10);
+    const page = Number.parseInt(selectMatch[2], 10);
+    const session = this.getCurrentSession();
+    if (!session) {
+      await ctx.answerCbQuery('当前没有可用会话');
+      return;
+    }
+
+    try {
+      const config = await this.hctx.opencode.getConfigProviders();
+      const indexedModels = this.buildIndexedModels(config);
+      const matched = indexedModels.find((entry) => entry.index === index);
+      if (!matched) {
+        await ctx.answerCbQuery('模型不存在');
+        return;
+      }
+
+      session.preferredModel = matched.label;
+      this.hctx.sessions.set(session);
+      await this.renderModelList(ctx, indexedModels, session, page, `✅ 已切换到 ${matched.label}`);
+      await ctx.answerCbQuery(`已切换到 ${matched.model}`);
+    } catch (error) {
+      await ctx.answerCbQuery('切换模型失败');
+    }
   }
 
   private async setPreferredAgent(
@@ -269,27 +311,92 @@ export class ModelHandler {
     return entries;
   }
 
-  private async resolveModelByIndex(input: string): Promise<{ index: number; label: string } | null> {
-    if (!/^\d+$/.test(input)) {
-      return null;
+  private getCurrentSession(): TelegramSession | null {
+    return this.hctx.sessions.get();
+  }
+
+  private async renderModelList(
+    ctx: Context<Update.MessageUpdate> | Context<Update.CallbackQueryUpdate>,
+    indexedModels: Array<{ index: number; provider: string; model: string; label: string }>,
+    session: TelegramSession,
+    page: number,
+    toast?: string,
+  ): Promise<void> {
+    const pageSize = 8;
+    const totalPages = Math.max(1, Math.ceil(indexedModels.length / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * pageSize;
+    const visibleModels = indexedModels.slice(start, start + pageSize);
+    const currentModel = await this.getResolvedModelInfo(session);
+
+    const lines = visibleModels.map((entry) => {
+      const current = entry.label === currentModel ? ' 👈 当前' : '';
+      return `• ${entry.provider}/${entry.model}${current}`;
+    });
+
+    const textParts = [
+      `🧠 可用模型 (${indexedModels.length})`,
+      '',
+      `当前模型：${currentModel}`,
+      '',
+      lines.join('\n'),
+      '',
+      `页码: ${safePage}/${totalPages}`,
+      '点击下方按钮即可切换模型。',
+    ];
+
+    if (toast) {
+      textParts.splice(2, 0, toast, '');
     }
 
-    const index = Number.parseInt(input, 10);
-    if (!Number.isFinite(index) || index <= 0) {
-      return null;
+    const replyMarkup = this.buildModelPagination(visibleModels, safePage, totalPages, currentModel);
+
+    if ('callback_query' in ctx.update && 'editMessageText' in ctx) {
+      const callbackCtx = ctx as unknown as Context<Update.CallbackQueryUpdate>;
+      await callbackCtx.editMessageText(textParts.join('\n'), { reply_markup: replyMarkup });
+      return;
     }
 
-    const config = await this.hctx.opencode.getConfigProviders();
-    const indexedModels = this.buildIndexedModels(config);
-    const matched = indexedModels.find((entry) => entry.index === index);
+    await ctx.reply(textParts.join('\n'), { reply_markup: replyMarkup });
+  }
 
-    if (!matched) {
-      return null;
+  private buildModelPagination(
+    visibleModels: Array<{ index: number; provider: string; model: string; label: string }>,
+    currentPage: number,
+    totalPages: number,
+    currentModel: string,
+  ) {
+    const rows = visibleModels.map((entry) => [{
+      text: `${entry.label === currentModel ? '✅ ' : ''}${entry.provider}/${entry.model}`,
+      callback_data: `models:set:${entry.index}:${currentPage}`,
+    }]);
+
+    const navigation: Array<{ text: string; callback_data: string }> = [];
+    if (currentPage > 1) {
+    navigation.push({ text: '⬅️ Prev', callback_data: `models:page:${currentPage - 1}` });
+    }
+    navigation.push({ text: `${currentPage}/${totalPages}`, callback_data: 'models:noop' });
+    if (currentPage < totalPages) {
+      navigation.push({ text: 'Next ➡️', callback_data: `models:page:${currentPage + 1}` });
     }
 
-    return {
-      index: matched.index,
-      label: matched.label,
-    };
+    if (navigation.length > 0) {
+      rows.push(navigation);
+    }
+
+    return { inline_keyboard: rows };
+  }
+
+  private getCallbackData(ctx: Context<Update.CallbackQueryUpdate>): string | undefined {
+    const callbackQuery = ctx.update.callback_query;
+    if (!callbackQuery || typeof callbackQuery !== 'object') {
+      return undefined;
+    }
+
+    if (!('data' in callbackQuery) || typeof callbackQuery.data !== 'string') {
+      return undefined;
+    }
+
+    return callbackQuery.data;
   }
 }

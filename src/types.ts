@@ -68,7 +68,7 @@ export interface OpenCodeMessage {
  * Message Part
  */
 export interface MessagePart {
-  type: 'text' | 'tool_use' | 'tool_result' | 'error';
+  type: 'text' | 'tool' | 'tool_use' | 'tool_result' | 'step-start' | 'step-finish' | 'error';
   text?: string;
   name?: string;
   content?: string;

@@ -375,11 +375,22 @@ export class BotHandlers {
       const formatted = formatCodeResponse(text).trim();
 
       if (!formatted) {
-        const hasPermissionFlow = response.parts.some((part) => part.type === 'tool_use' || part.type === 'tool_result');
+        const hasRunningTool = response.parts.some((part) => {
+          if (part.type !== 'tool') {
+            return false;
+          }
+
+          const state = part.metadata?.state;
+          return typeof state === 'object' && state !== null && (state as Record<string, unknown>).status === 'running';
+        });
+        const hasPermissionFlow = response.parts.some((part) => part.type === 'tool_use' || part.type === 'tool_result' || part.type === 'tool');
+        const pendingPermissions = this.permissionHandler.getPendingCount();
         await ctx.reply(
-          hasPermissionFlow
+          pendingPermissions > 0
             ? '🔐 已发出权限请求，请先在权限消息中选择允许或拒绝。'
-            : '✅ 请求已提交，但当前没有可显示的文本输出。'
+            : hasRunningTool || hasPermissionFlow
+              ? '⏳ 请求仍在处理中，可能正在等待权限确认或工具执行结果。若长时间没有弹窗，可回复 continue 或使用 /abort。'
+              : '✅ 请求已提交，但当前没有可显示的文本输出。'
         );
         return;
       }

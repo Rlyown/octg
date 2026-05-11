@@ -99,16 +99,28 @@ read_env_value() {
     printf '%s\n' "$line"
 }
 
+instance_has_env_files() {
+    local name="$1"
+    [ -f "$(bot_env_file "$name")" ] && [ -f "$(server_env_file "$name")" ]
+}
+
+require_complete_instance() {
+    local name="$1"
+    require_instance "$name"
+    if ! instance_has_env_files "$name"; then
+        print_error "Instance '$name' is missing env files"
+        print_info "Remove it with ./manage-bots.sh remove $name and create it again."
+        exit 1
+    fi
+}
+
 load_instance_meta() {
     local name="$1"
     BOT_ENV_FILE="$(bot_env_file "$name")"
     SERVER_ENV_FILE="$(server_env_file "$name")"
     META_ENV_FILE="$(meta_env_file "$name")"
 
-    if [ ! -f "$BOT_ENV_FILE" ] || [ ! -f "$SERVER_ENV_FILE" ]; then
-        print_error "Instance '$name' is missing env files"
-        exit 1
-    fi
+    require_complete_instance "$name"
 
     INSTANCE_DIR="$(instance_dir "$name")"
     INSTANCE_MANAGED="$(read_env_value "$SERVER_ENV_FILE" OPENCODE_MANAGED true)"
@@ -646,6 +658,10 @@ cmd_list() {
     while IFS= read -r name; do
         [ -n "$name" ] || continue
         found=true
+        if ! instance_has_env_files "$name"; then
+            echo "- ${name} (incomplete)"
+            continue
+        fi
         load_instance_meta "$name"
         local mode='local'
         if [ "$INSTANCE_MANAGED" != "true" ]; then
@@ -679,6 +695,10 @@ cmd_start() {
     (cd "$SCRIPT_DIR" && npm run build)
 
     for name in "${names[@]}"; do
+        if ! instance_has_env_files "$name"; then
+            print_warning "Skipping incomplete instance $name"
+            continue
+        fi
         load_instance_meta "$name"
         render_service_files "$name"
 
@@ -719,6 +739,18 @@ cmd_stop() {
     done < <(resolve_target_names "$target")
 
     for name in "${names[@]}"; do
+        if ! instance_has_env_files "$name"; then
+            if is_macos; then
+                stop_launchd_service "$(user_launchd_path "$(launchd_bot_label "$name")")"
+                stop_launchd_service "$(user_launchd_path "$(launchd_server_label "$name")")"
+            else
+                stop_systemd_service "$(systemd_bot_unit "$name")"
+                stop_systemd_service "$(systemd_server_unit "$name")"
+            fi
+            print_success "Stopped incomplete instance $name"
+            continue
+        fi
+
         load_instance_meta "$name"
         if is_macos; then
             stop_launchd_service "$(user_launchd_path "$(launchd_bot_label "$name")")"
@@ -751,6 +783,14 @@ cmd_status() {
     fi
 
     for name in "${names[@]}"; do
+        if ! instance_has_env_files "$name"; then
+            echo "${name}"
+            echo "  state: incomplete"
+            echo "  fix: remove and recreate this instance"
+            echo ""
+            continue
+        fi
+
         load_instance_meta "$name"
         echo "${name}"
         echo "  server: ${INSTANCE_SERVER_URL}"
@@ -792,7 +832,7 @@ cmd_logs() {
         fi
     fi
 
-    require_instance "$target"
+    require_complete_instance "$target"
     load_instance_meta "$target"
 
     local file=''
@@ -831,7 +871,7 @@ cmd_pair() {
         exit 1
     fi
 
-    require_instance "$name"
+    require_complete_instance "$name"
     load_instance_meta "$name"
 
     print_info "Generating pairing code for $name"
@@ -849,7 +889,7 @@ cmd_whitelist() {
         exit 1
     fi
 
-    require_instance "$name"
+    require_complete_instance "$name"
     load_instance_meta "$name"
 
     local action="${1:-list}"
@@ -881,7 +921,6 @@ cmd_remove() {
     fi
 
     require_instance "$name"
-    load_instance_meta "$name"
 
     read -r -p "Remove instance '$name' and its generated service files? (y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -889,7 +928,7 @@ cmd_remove() {
         exit 0
     fi
 
-    cmd_stop "$name" > /dev/null
+    cmd_stop "$name" > /dev/null || true
 
     rm -rf "$(instance_dir "$name")"
     rm -f "$(generated_launchd_path "$(launchd_bot_label "$name")")" "$(generated_launchd_path "$(launchd_server_label "$name")")"

@@ -33,7 +33,8 @@ export class BotHandlers {
     'config', 'providers', 'status_all', 'children',
     'init', 'symbol', 'git_status', 'tools',
   ]);
-  private static readonly CHAT_JOB_TIMEOUT_MS = 3 * 60 * 1000;
+  private static readonly CHAT_JOB_TIMEOUT_MS = 30 * 1000; // Reduced from 3 min to 30 sec for faster feedback
+  private static readonly CHAT_JOB_POLL_INTERVAL_MS = 5 * 1000; // Poll every 5 seconds as fallback
 
   private bot: Telegraf;
   private opencode: OpenCodeClient;
@@ -55,7 +56,9 @@ export class BotHandlers {
     messageCountBefore: number;
     processingMessageId: number;
     timeoutTimer: NodeJS.Timeout;
+    pollTimer?: NodeJS.Timeout;
   }>();
+  private pollInterval: NodeJS.Timeout | null = null;
 
   constructor(
     bot: Telegraf,
@@ -166,14 +169,35 @@ export class BotHandlers {
     this.sseClient.on('session.permission.requested', handlePermissionEvent);
 
     this.sseClient.on('session.status', (event) => {
-      const props = event.properties as { sessionID: string; status: { type: string } };
+      const props = event.properties as { sessionID?: string; sessionId?: string; status: { type: string } };
+      // Support both sessionID and sessionId property names
+      const sessionID = props.sessionID || props.sessionId;
+      if (!sessionID) {
+        this.logger.warn('SSE session.status event missing sessionID/sessionId property');
+        return;
+      }
       if (props.status?.type === 'idle') {
-        void this.taskHandler.resolveTaskJob(props.sessionID);
-        void this.resolveChatJob(props.sessionID);
+        this.logger.debug(`SSE session.status idle event received for session=${this.shortId(sessionID)}`);
+        void this.taskHandler.resolveTaskJob(sessionID);
+        void this.resolveChatJob(sessionID);
       }
     });
 
     this.sseClient.start();
+    this.startChatJobPoller();
+  }
+
+  private startChatJobPoller(): void {
+    if (this.pollInterval) clearInterval(this.pollInterval);
+    this.pollInterval = setInterval(() => {
+      for (const [sessionID, job] of this.pendingChatJobs.entries()) {
+        const elapsedMs = Date.now() - job.startedAt;
+        if (elapsedMs > 10000) {
+          this.logger.debug(`Polling fallback: checking session=${this.shortId(sessionID)} elapsed=${elapsedMs}ms`);
+          void this.resolveChatJob(sessionID);
+        }
+      }
+    }, BotHandlers.CHAT_JOB_POLL_INTERVAL_MS);
   }
 
   private setupHandlers(): void {
@@ -404,9 +428,14 @@ export class BotHandlers {
         { directory: session.directory }
       );
 
+      this.logger.info(
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request sent async messageCountBefore=${messageCountBefore}`
+      );
+
       const timeoutTimer = setTimeout(() => {
         const job = this.pendingChatJobs.get(session!.openCodeSessionId);
         if (!job) return;
+        this.logger.warn(`Chat job timeout for session=${this.shortId(session!.openCodeSessionId)} after ${BotHandlers.CHAT_JOB_TIMEOUT_MS}ms`);
         this.pendingChatJobs.delete(session!.openCodeSessionId);
         void this.handleChatTimeout(session!.openCodeSessionId, session?.directory, job.chatId, job.processingMessageId);
       }, BotHandlers.CHAT_JOB_TIMEOUT_MS);
@@ -418,6 +447,10 @@ export class BotHandlers {
         processingMessageId: processingMsg.message_id,
         timeoutTimer,
       });
+
+      this.logger.info(
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=job_queued timeout=${BotHandlers.CHAT_JOB_TIMEOUT_MS}ms`
+      );
     } catch (error) {
       const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       this.logger.error(
@@ -446,8 +479,12 @@ export class BotHandlers {
 
   private async resolveChatJob(sessionID: string): Promise<void> {
     const job = this.pendingChatJobs.get(sessionID);
-    if (!job) return;
+    if (!job) {
+      this.logger.debug(`resolveChatJob: no pending job for session=${this.shortId(sessionID)}`);
+      return;
+    }
 
+    this.logger.info(`resolveChatJob: resolving session=${this.shortId(sessionID)} elapsed=${Date.now() - job.startedAt}ms`);
     this.pendingChatJobs.delete(sessionID);
     clearTimeout(job.timeoutTimer);
 
@@ -458,6 +495,8 @@ export class BotHandlers {
       });
       const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
       const newAssistantMessages = assistantMessages.slice(job.messageCountBefore);
+
+      this.logger.debug(`resolveChatJob: session=${this.shortId(sessionID)} newMessages=${newAssistantMessages.length}`);
 
       const textMessages = newAssistantMessages
         .map((message) => ({
@@ -470,6 +509,7 @@ export class BotHandlers {
         .filter((message) => message.text.length > 0);
 
       if (textMessages.length > 0) {
+        this.logger.info(`resolveChatJob: session=${this.shortId(sessionID)} sending ${textMessages.length} text messages`);
         for (const message of textMessages) {
           const formatted = formatCodeResponse(message.text).trim();
           if (!formatted) continue;
@@ -490,6 +530,7 @@ export class BotHandlers {
 
       const hasError = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'error'));
       if (hasError) {
+        this.logger.info(`resolveChatJob: session=${this.shortId(sessionID)} has error messages`);
         const errorText = newAssistantMessages
           .flatMap((message) => message.parts)
           .filter((part) => part.type === 'error')
@@ -502,6 +543,7 @@ export class BotHandlers {
       }
 
       const hasRunningTool = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'tool'));
+      this.logger.info(`resolveChatJob: session=${this.shortId(sessionID)} hasRunningTool=${hasRunningTool}`);
       await this.editOrSendChatMessage(
         job.chatId,
         job.processingMessageId,

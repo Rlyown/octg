@@ -34,6 +34,7 @@ export class ModelHandler {
         `${resolvedModel}\n\n` +
         `用法：\n` +
         `/model <provider/model> 设置模型\n` +
+        `/model <index> 按编号设置模型\n` +
         `/model clear 清除模型覆盖\n` +
         `/model list 列出可用模型`
       );
@@ -44,11 +45,13 @@ export class ModelHandler {
       this.logger.info('listing available models');
       try {
         const config = await this.hctx.opencode.getConfigProviders();
-        this.logger.info(`found ${config.providers.length} providers`);
-        const lines = config.providers.map(p => {
-          const models = p.models.slice(0, 5).join(', ');
-          const more = p.models.length > 5 ? `... (+${p.models.length - 5})` : '';
-          return `• ${p.provider}: ${models}${more}`;
+        const indexedModels = this.buildIndexedModels(config);
+        this.logger.info(`found ${config.providers.length} providers and ${indexedModels.length} models`);
+        const lines = config.providers.map((provider) => {
+          const providerModels = indexedModels.filter((entry) => entry.provider === provider.provider);
+          const models = providerModels.slice(0, 5).map((entry) => `${entry.index}. ${entry.model}`).join(', ');
+          const more = providerModels.length > 5 ? `... (+${providerModels.length - 5})` : '';
+          return `• ${provider.provider}: ${models}${more}`;
         });
         await ctx.reply(`🧠 可用模型 (${config.providers.length} providers)\n\n${lines.join('\n')}`);
         this.logger.info('model list sent successfully');
@@ -64,6 +67,20 @@ export class ModelHandler {
       delete session.preferredModel;
       this.hctx.sessions.set(session);
       await ctx.reply(`✅ 已清除模型覆盖\n\n后续消息将优先使用 OpenCode 默认模型；如果服务端默认无法解析，则回退到 ${ModelHandler.FALLBACK_MODEL}`);
+      return;
+    }
+
+    const selectedByIndex = await this.resolveModelByIndex(normalized);
+    if (selectedByIndex) {
+      session.preferredModel = selectedByIndex.label;
+      this.logger.info(`model set by index ${normalized}: ${selectedByIndex.label}`);
+      this.hctx.sessions.set(session);
+      await ctx.reply(`✅ 已按编号设置模型\n\n${normalized} → ${selectedByIndex.label}`);
+      return;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      await ctx.reply(`❌ 模型编号 ${normalized} 不存在\n\n请先执行 /model list 查看可用编号。`);
       return;
     }
 
@@ -226,5 +243,53 @@ export class ModelHandler {
     }
 
     return undefined;
+  }
+
+  private buildIndexedModels(config: { providers: Array<{ provider: string; models: string[] }> }): Array<{
+    index: number;
+    provider: string;
+    model: string;
+    label: string;
+  }> {
+    const entries: Array<{ index: number; provider: string; model: string; label: string }> = [];
+    let index = 1;
+
+    for (const provider of config.providers) {
+      for (const model of provider.models) {
+        entries.push({
+          index,
+          provider: provider.provider,
+          model,
+          label: `${provider.provider}/${model}`,
+        });
+        index += 1;
+      }
+    }
+
+    return entries;
+  }
+
+  private async resolveModelByIndex(input: string): Promise<{ index: number; label: string } | null> {
+    if (!/^\d+$/.test(input)) {
+      return null;
+    }
+
+    const index = Number.parseInt(input, 10);
+    if (!Number.isFinite(index) || index <= 0) {
+      return null;
+    }
+
+    const config = await this.hctx.opencode.getConfigProviders();
+    const indexedModels = this.buildIndexedModels(config);
+    const matched = indexedModels.find((entry) => entry.index === index);
+
+    if (!matched) {
+      return null;
+    }
+
+    return {
+      index: matched.index,
+      label: matched.label,
+    };
   }
 }

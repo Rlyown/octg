@@ -177,8 +177,23 @@ export class PermissionHandler {
   }
 
   private getSession(sessionId: string): TelegramSession | null {
-    const s = this.sessions.get();
-    return s?.openCodeSessionId === sessionId ? s : null;
+    const currentSession = this.sessions.get();
+    if (!currentSession) {
+      return null;
+    }
+
+    if (currentSession.openCodeSessionId === sessionId) {
+      return currentSession;
+    }
+
+    if (currentSession.telegramChatId) {
+      this.logger.warn(
+        `permission session mismatch requested=${this.shortId(sessionId)} current=${this.shortId(currentSession.openCodeSessionId)}; delivering to current telegram chat`
+      );
+      return currentSession;
+    }
+
+    return null;
   }
 
   private cleanupExpiredPermissions(): void {

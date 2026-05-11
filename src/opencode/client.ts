@@ -237,7 +237,63 @@ export class OpenCodeClient {
   }
 
   async getConfigProviders(): Promise<ConfigProviders> {
-    return this.request('/config/providers');
+    const raw = await this.request<unknown>('/config/providers');
+    return this.normalizeConfigProviders(raw);
+  }
+
+  private normalizeConfigProviders(raw: unknown): ConfigProviders {
+    const source = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
+    const rawProviders = Array.isArray(source.providers) ? source.providers : [];
+
+    return {
+      providers: rawProviders.map((provider) => this.normalizeProviderEntry(provider)),
+      default: this.normalizeDefaultConfig(source.default),
+    };
+  }
+
+  private normalizeProviderEntry(raw: unknown): ConfigProviders['providers'][number] {
+    const source = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
+    const provider = this.normalizeProviderName(source);
+    const models = this.normalizeProviderModels(source.models);
+
+    return { provider, models };
+  }
+
+  private normalizeProviderName(source: Record<string, unknown>): string {
+    const candidates = [source.provider, source.id, source.name];
+    const firstString = candidates.find((value) => typeof value === 'string' && value.length > 0);
+    return typeof firstString === 'string' ? firstString : 'unknown';
+  }
+
+  private normalizeProviderModels(raw: unknown): string[] {
+    if (Array.isArray(raw)) {
+      return raw
+        .map((value) => typeof value === 'string' ? value : null)
+        .filter((value): value is string => value !== null);
+    }
+
+    if (raw && typeof raw === 'object') {
+      return Object.keys(raw as Record<string, unknown>);
+    }
+
+    if (typeof raw === 'string' && raw.length > 0) {
+      return [raw];
+    }
+
+    return [];
+  }
+
+  private normalizeDefaultConfig(raw: unknown): Record<string, string> {
+    if (!raw || typeof raw !== 'object') {
+      return {};
+    }
+
+    return Object.entries(raw as Record<string, unknown>).reduce<Record<string, string>>((acc, [key, value]) => {
+      if (typeof value === 'string') {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
   }
 
   async findText(pattern: string, options: SessionRequestOptions = {}): Promise<SearchResult[]> {

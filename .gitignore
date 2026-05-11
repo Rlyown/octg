@@ -7,8 +7,13 @@ dist/
 
 # Environment variables
 .env
+.env.legacy-*.backup
 .env.local
 .env.*.local
+instances/*/bot.env
+instances/*/server.env
+instances/*/meta.env
+instances/*/whitelist.json
 
 # Data
 data/
@@ -34,3 +39,7 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Generated service definitions
+services/launchd/*.plist
+services/systemd-user/*.service

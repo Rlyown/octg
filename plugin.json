@@ -46,10 +46,10 @@
   },
   "runtime": {
     "host": {
-      "startCommand": "./control.sh host",
-      "stopCommand": "./control.sh stop",
-      "statusCommand": "./control.sh status",
-      "logsCommand": "./control.sh logs"
+      "startCommand": "./manage-bots.sh start",
+      "stopCommand": "./manage-bots.sh stop",
+      "statusCommand": "./manage-bots.sh status",
+      "logsCommand": "./manage-bots.sh logs"
     }
   }
 }

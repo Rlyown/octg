@@ -6,15 +6,18 @@
 
 ### 1. 启动服务
 ```bash
-# Terminal 1: 启动 OpenCode Server
-./opencode-server.sh start
+# 创建一个测试实例（首次执行）
+./manage-bots.sh add test-bot
 
-# Terminal 2: 启动 Telegram Bot
-./control.sh host
+# 启动该实例的 OpenCode Server + Telegram Bot 服务
+./manage-bots.sh start test-bot
 
-# 检查状态
-./opencode-server.sh status
-./control.sh status
+# 检查实例状态
+./manage-bots.sh status test-bot
+
+# 如需前台调试，可分别使用辅助脚本
+./opencode-server.sh --env-file instances/test-bot/server.env status
+./control.sh --env-file instances/test-bot/bot.env status
 ```
 
 ### 2. 配置测试环境

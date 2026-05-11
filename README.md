@@ -1,6 +1,6 @@
 # OpenCode Telegram Plugin
 
-Standalone Telegram Bot for OpenCode Server with host-based deployment.
+Standalone Telegram Bot for OpenCode Server with multi-instance service deployment.
 
 ## Features
 
@@ -33,6 +33,10 @@ npm run build
 
 ### 3. Configuration
 
+For a quick single-instance foreground setup, you can still copy `.env.example` to `.env` and use the foreground helpers.
+
+For long-running service deployment, use `manage-bots.sh` instead.
+
 Copy example environment file:
 
 ```bash
@@ -50,31 +54,43 @@ OPENCODE_PASSWORD=your_opencode_password
 WORKSPACE_PATH=~/GitProject
 ```
 
-When `./control.sh host` auto-starts `opencode serve`, it uses `WORKSPACE_PATH`
-as the server working directory. If unset, it defaults to `~/GitProject`.
+`./control.sh` and `./opencode-server.sh` are now foreground/debug helpers only.
+They no longer register background services.
 
 ## Deployment
 
 ### Host Deployment
 
-**Using the OpenCode Server Control Script (Recommended):**
+**Using the Multi-Instance Manager (Recommended):**
 
 ```bash
-# Start OpenCode server in background
-./opencode-server.sh start
+# Create one instance
+./manage-bots.sh add bot1
+
+# Start one instance
+./manage-bots.sh start bot1
+
+# Start all configured instances
+./manage-bots.sh start all
 
 # Check status
-./opencode-server.sh status
+./manage-bots.sh status
 
-# View logs
-./opencode-server.sh logs
+# View logs for one instance
+./manage-bots.sh logs bot1 bot
 
-# Stop server
-./opencode-server.sh stop
+# Generate a pairing code for one instance
+./manage-bots.sh pair bot1
 
-# Or run in foreground (Ctrl+C to stop)
-./opencode-server.sh fg
+# Inspect or remove whitelist entries for one instance
+./manage-bots.sh whitelist bot1
+./manage-bots.sh whitelist bot1 remove user 123456789
+
+# Stop one instance
+./manage-bots.sh stop bot1
 ```
+
+If `opencode` is not on a system service PATH like `/usr/local/bin` or `/opt/homebrew/bin`, set `OPENCODE_BIN` in `instances/<name>/server.env` to an absolute executable path.
 
 **Manual Method - Terminal 1 - Start OpenCode Server:**
 
@@ -97,36 +113,34 @@ export OPENCODE_PASSWORD="your-password"
 npm start
 ```
 
-Using the Telegram plugin control script:
+Using the foreground helper scripts:
 
 ```bash
-# Interactive first-time setup
+# Create a local debug env
 ./control.sh setup
 
-# Run in foreground
+# Run the bot in foreground against the configured server
 ./control.sh host
 
-# Or build and start directly
-npm run build
-npm start
+# Or debug a managed instance
+./control.sh --env-file instances/bot1/bot.env host
+./opencode-server.sh --env-file instances/bot1/server.env fg
 ```
 
 Other useful commands:
 
 ```bash
-# OpenCode Server Control
-./opencode-server.sh start     # Start OpenCode server in background
-./opencode-server.sh stop      # Stop OpenCode server
-./opencode-server.sh status    # Check OpenCode server status
-./opencode-server.sh restart   # Restart OpenCode server
-./opencode-server.sh logs      # View OpenCode server logs
-./opencode-server.sh fg        # Run OpenCode server in foreground
+# Multi-instance service control
+./manage-bots.sh list
+./manage-bots.sh start all
+./manage-bots.sh stop all
+./manage-bots.sh status all
+./manage-bots.sh logs bot1 bot
 
-# Telegram Plugin Control
-./control.sh status            # Check Telegram bot status
-./control.sh logs              # View Telegram bot logs
-./control.sh restart           # Restart Telegram bot
-./control.sh stop              # Stop Telegram bot
+# Foreground helpers
+./control.sh status
+./control.sh logs
+./opencode-server.sh --env-file instances/bot1/server.env status
 ```
 
 ## Commands

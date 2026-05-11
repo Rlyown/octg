@@ -14,45 +14,51 @@
 atk plugins telegram setup
 ```
 
-### 3. Start OpenCode Server
+### 3. Create an Instance
 
 ```bash
-export OPENCODE_SERVER_PASSWORD="your-password"
-opencode serve --port 4096 --hostname 127.0.0.1
+./manage-bots.sh add bot1
 ```
 
-### 4. Start Telegram Plugin
+### 4. Start Services
 
-#### Option A: Background Mode (Recommended)
+#### Option A: Service Mode (Recommended)
 
 ```bash
-atk plugins telegram start
+./manage-bots.sh start bot1
 ```
 
-Background mode uses:
-- **macOS**: `launchd` via `~/Library/LaunchAgents/com.opencode.telegram.plist`
-- **Linux with systemd**: user service via `~/.config/systemd/user/opencode-telegram.service`
-- **Linux without systemd**: `nohup` with pid file
+Service mode uses:
+- **macOS**: `launchd` with per-instance labels like `com.opencode.telegram.bot1`
+- **Linux**: `systemd --user` with per-instance units like `opencode-telegram-bot1.service`
+
+If the `opencode` binary is installed outside common service PATH locations, set `OPENCODE_BIN` in `instances/<name>/server.env` to its absolute path before starting the instance.
 
 Check status:
 ```bash
-atk plugins telegram status
+./manage-bots.sh status bot1
 ```
 
 View logs:
 ```bash
-atk plugins telegram logs
+./manage-bots.sh logs bot1 bot
 ```
 
 Stop:
 ```bash
-atk plugins telegram stop
+./manage-bots.sh stop bot1
 ```
 
 #### Option B: Foreground Mode
 
 ```bash
-atk plugins telegram host
+./control.sh --env-file instances/bot1/bot.env host
+```
+
+If the instance manages a local OpenCode server, you can also run it in foreground:
+
+```bash
+./opencode-server.sh --env-file instances/bot1/server.env fg
 ```
 
 Foreground mode runs in the current terminal. Press `Ctrl+C` to stop.
@@ -73,7 +79,7 @@ make clean
 |----------|----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | - | Telegram bot token |
 | `OPENCODE_PASSWORD` | Yes | - | OpenCode server password |
-| `WORKSPACE_PATH` | No | `~/GitProject` | Default `opencode serve` working directory for auto-start |
+| `WORKSPACE_PATH` | No | `~/GitProject` | Default `opencode serve` working directory for managed local instances |
 | `CONFIG_PATH` | No | `~/.config/opencode` | OpenCode config path |
 | `DATA_PATH` | No | `~/.local/share/opencode` | OpenCode data path |
 
@@ -91,8 +97,8 @@ curl -u opencode:your-password http://127.0.0.1:4096/global/health
 WORKSPACE_PATH=/Users/username/projects/my-project
 ```
 
-When `atk` auto-starts OpenCode, it now launches `opencode serve` inside `WORKSPACE_PATH`.
-If you do not set it, the default working directory is `~/GitProject`.
+When `manage-bots.sh` creates a managed local instance, it writes `WORKSPACE_PATH` into `instances/<name>/server.env`.
+If you do not override it during `add`, the default working directory is `~/GitProject`.
 
 ### Re-run setup
 

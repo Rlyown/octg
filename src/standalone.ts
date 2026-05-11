@@ -6,9 +6,61 @@ import { createBot, setupPolling } from './bot/index.js';
 import { BotHandlers } from './bot/handlers/index.js';
 import { Notifier } from './bot/notifier.js';
 import { getLogger, initLogger } from './logger.js';
+import type { TelegramSession } from './types.js';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 
 const bootstrapLogger = getLogger('standalone');
 const startupLogger = getLogger('startup');
+
+const SESSION_FILE = process.env.OCTG_SESSION_FILE || './data/session.json';
+
+function loadSavedSession(): TelegramSession | null {
+  try {
+    if (!existsSync(SESSION_FILE)) {
+      return null;
+    }
+    const content = readFileSync(SESSION_FILE, 'utf-8');
+    const data = JSON.parse(content);
+    return {
+      telegramChatId: data.telegramChatId || '',
+      openCodeSessionId: data.openCodeSessionId,
+      openCodeSessionTitle: data.openCodeSessionTitle,
+      directory: data.directory,
+      preferredModel: data.preferredModel,
+      preferredAgent: data.preferredAgent,
+      createdAt: new Date(data.createdAt),
+      lastActivity: new Date(data.lastActivity),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(session: TelegramSession | null): void {
+  try {
+    if (!session) {
+      return;
+    }
+    const dir = dirname(SESSION_FILE);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const data = {
+      telegramChatId: session.telegramChatId,
+      openCodeSessionId: session.openCodeSessionId,
+      openCodeSessionTitle: session.openCodeSessionTitle,
+      directory: session.directory,
+      preferredModel: session.preferredModel,
+      preferredAgent: session.preferredAgent,
+      createdAt: session.createdAt.toISOString(),
+      lastActivity: session.lastActivity.toISOString(),
+    };
+    writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+  } catch (error) {
+    bootstrapLogger.error('Failed to save session:', error);
+  }
+}
 
 async function main() {
   // Load and validate configuration
@@ -22,6 +74,7 @@ async function main() {
   logger.info('Configuration loaded:');
   logger.info(`  Telegram Mode: ${config.telegram.mode}`);
   logger.info(`  OpenCode Server: ${config.opencode.serverUrl}`);
+  logger.info(`  Session File: ${SESSION_FILE}`);
   logger.info('');
 
   // Initialize OpenCode client
@@ -43,39 +96,76 @@ async function main() {
   const health = await opencode.health();
   logger.info(`✅ Connected to OpenCode server (v${health.version})\n`);
 
-  // Initialize session manager and auto-select session from OC server
+  // Initialize session manager
   const sessionManager = new SessionManager();
 
-  const ocSessions = await opencode.listSessions();
-  if (ocSessions.length > 0) {
-    const first = ocSessions[0];
-    const firstDetail = await opencode.getSession(first.id).catch(() => first);
-    sessionManager.set({
-      telegramChatId: '',
-      openCodeSessionId: firstDetail.id,
-      openCodeSessionTitle: firstDetail.title,
-      directory: firstDetail.directory,
-      createdAt: new Date(firstDetail.time.created),
-      lastActivity: new Date(firstDetail.time.updated),
-    });
-    startupLogger.info(
-      `✅ Auto-selected session: ${firstDetail.title || firstDetail.id.slice(0, 12)}${firstDetail.directory ? ` (${firstDetail.directory})` : ''}\n`
-    );
-  } else {
-    const created = await opencode.createSession();
-    const createdDetail = await opencode.getSession(created.id).catch(() => created);
-    sessionManager.set({
-      telegramChatId: '',
-      openCodeSessionId: createdDetail.id,
-      openCodeSessionTitle: createdDetail.title,
-      directory: createdDetail.directory,
-      createdAt: new Date(createdDetail.time.created),
-      lastActivity: new Date(createdDetail.time.updated),
-    });
-    startupLogger.info(
-      `✅ No sessions found, created new session: ${createdDetail.id.slice(0, 12)}${createdDetail.directory ? ` (${createdDetail.directory})` : ''}\n`
-    );
+  // Try to load saved session first
+  const savedSession = loadSavedSession();
+  let sessionRestored = false;
+
+  if (savedSession) {
+    // Verify the saved session still exists on the server
+    try {
+      const sessionDetail = await opencode.getSession(savedSession.openCodeSessionId);
+      sessionManager.set({
+        telegramChatId: savedSession.telegramChatId,
+        openCodeSessionId: sessionDetail.id,
+        openCodeSessionTitle: sessionDetail.title || savedSession.openCodeSessionTitle,
+        directory: sessionDetail.directory || savedSession.directory,
+        preferredModel: savedSession.preferredModel,
+        preferredAgent: savedSession.preferredAgent,
+        createdAt: savedSession.createdAt,
+        lastActivity: new Date(),
+      });
+      sessionRestored = true;
+      startupLogger.info(
+        `✅ Restored session: ${sessionDetail.title || sessionDetail.id.slice(0, 12)}${sessionDetail.directory ? ` (${sessionDetail.directory})` : ''}\n`
+      );
+    } catch {
+      startupLogger.info(`⚠️ Saved session ${savedSession.openCodeSessionId.slice(0, 12)}... not found on server, will auto-select\n`);
+    }
   }
+
+  // If no saved session or restoration failed, auto-select from server
+  if (!sessionRestored) {
+    const ocSessions = await opencode.listSessions();
+    if (ocSessions.length > 0) {
+      const first = ocSessions[0];
+      const firstDetail = await opencode.getSession(first.id).catch(() => first);
+      sessionManager.set({
+        telegramChatId: '',
+        openCodeSessionId: firstDetail.id,
+        openCodeSessionTitle: firstDetail.title,
+        directory: firstDetail.directory,
+        createdAt: new Date(firstDetail.time.created),
+        lastActivity: new Date(firstDetail.time.updated),
+      });
+      startupLogger.info(
+        `✅ Auto-selected session: ${firstDetail.title || firstDetail.id.slice(0, 12)}${firstDetail.directory ? ` (${firstDetail.directory})` : ''}\n`
+      );
+    } else {
+      const created = await opencode.createSession();
+      const createdDetail = await opencode.getSession(created.id).catch(() => created);
+      sessionManager.set({
+        telegramChatId: '',
+        openCodeSessionId: createdDetail.id,
+        openCodeSessionTitle: createdDetail.title,
+        directory: createdDetail.directory,
+        createdAt: new Date(createdDetail.time.created),
+        lastActivity: new Date(createdDetail.time.updated),
+      });
+      startupLogger.info(
+        `✅ No sessions found, created new session: ${createdDetail.id.slice(0, 12)}${createdDetail.directory ? ` (${createdDetail.directory})` : ''}\n`
+      );
+    }
+  }
+
+  // Save session when it changes
+  const originalSet = sessionManager.set.bind(sessionManager);
+  sessionManager.set = (session: import('./types.js').TelegramSession) => {
+    originalSet(session);
+    saveSession(session);
+  };
 
   // Create Telegram bot
   const bot = createBot(config.telegram);

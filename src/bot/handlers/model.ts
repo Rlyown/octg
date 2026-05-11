@@ -311,10 +311,6 @@ export class ModelHandler {
     return entries;
   }
 
-  private getCurrentSession(): TelegramSession | null {
-    return this.hctx.sessions.get();
-  }
-
   private async renderModelList(
     ctx: Context<Update.MessageUpdate> | Context<Update.CallbackQueryUpdate>,
     indexedModels: Array<{ index: number; provider: string; model: string; label: string }>,
@@ -373,7 +369,7 @@ export class ModelHandler {
 
     const navigation: Array<{ text: string; callback_data: string }> = [];
     if (currentPage > 1) {
-    navigation.push({ text: '⬅️ Prev', callback_data: `models:page:${currentPage - 1}` });
+      navigation.push({ text: '⬅️ Prev', callback_data: `models:page:${currentPage - 1}` });
     }
     navigation.push({ text: `${currentPage}/${totalPages}`, callback_data: 'models:noop' });
     if (currentPage < totalPages) {
@@ -385,6 +381,10 @@ export class ModelHandler {
     }
 
     return { inline_keyboard: rows };
+  }
+
+  private getCurrentSession(): TelegramSession | null {
+    return this.hctx.sessions.get();
   }
 
   private getCallbackData(ctx: Context<Update.CallbackQueryUpdate>): string | undefined {

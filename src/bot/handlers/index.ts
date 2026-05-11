@@ -33,6 +33,7 @@ export class BotHandlers {
     'config', 'providers', 'status_all', 'children',
     'init', 'symbol', 'git_status', 'tools',
   ]);
+  private static readonly CHAT_JOB_TIMEOUT_MS = 3 * 60 * 1000;
 
   private bot: Telegraf;
   private opencode: OpenCodeClient;
@@ -48,6 +49,12 @@ export class BotHandlers {
   private fileHandler: FileHandler;
   private taskHandler: TaskHandler;
   private generalHandler: GeneralHandler;
+  private pendingChatJobs = new Map<string, {
+    chatId: string;
+    startedAt: number;
+    messageCountBefore: number;
+    timeoutTimer: NodeJS.Timeout;
+  }>();
 
   constructor(
     bot: Telegraf,
@@ -116,29 +123,52 @@ export class BotHandlers {
       this.config.opencode.password
     );
 
-    this.sseClient.on('permission.asked', (event) => {
-      const props = event.properties as {
-        id: string;
-        sessionID: string;
-        permission: string;
-        patterns: string[];
-        metadata: Record<string, unknown>;
-        always: string[];
-        tool?: { messageID: string; callID: string };
-      };
+    const handlePermissionEvent = (event: { properties: unknown }) => {
+      const props = (event.properties && typeof event.properties === 'object')
+        ? event.properties as Record<string, unknown>
+        : {};
+      const tool = (props.tool && typeof props.tool === 'object') ? props.tool as Record<string, unknown> : undefined;
+      const patterns = Array.isArray(props.patterns) ? props.patterns : [];
+      const sessionID = typeof props.sessionID === 'string'
+        ? props.sessionID
+        : typeof props.sessionId === 'string'
+          ? props.sessionId
+          : '';
+      const permissionID = typeof props.id === 'string'
+        ? props.id
+        : typeof props.permissionID === 'string'
+          ? props.permissionID
+          : typeof props.permissionId === 'string'
+            ? props.permissionId
+            : '';
+      const description = typeof props.permission === 'string'
+        ? props.permission
+        : typeof props.description === 'string'
+          ? props.description
+          : undefined;
+
+      if (!sessionID || !permissionID) {
+        this.logger.warn('permission event missing identifiers');
+        return;
+      }
+
       this.permissionHandler.handlePermissionRequest({
-        sessionID: props.sessionID,
-        permissionID: props.id,
-        description: props.permission,
-        tool: props.tool?.callID,
-        action: props.patterns?.[0],
+        sessionID,
+        permissionID,
+        description,
+        tool: typeof tool?.callID === 'string' ? tool.callID : undefined,
+        action: typeof patterns[0] === 'string' ? patterns[0] : undefined,
       });
-    });
+    };
+
+    this.sseClient.on('permission.asked', handlePermissionEvent);
+    this.sseClient.on('session.permission.requested', handlePermissionEvent);
 
     this.sseClient.on('session.status', (event) => {
       const props = event.properties as { sessionID: string; status: { type: string } };
       if (props.status?.type === 'idle') {
         void this.taskHandler.resolveTaskJob(props.sessionID);
+        void this.resolveChatJob(props.sessionID);
       }
     });
 
@@ -337,6 +367,12 @@ export class BotHandlers {
       await ctx.reply('还没有会话，使用 /new <绝对路径> [标题] 创建。');
       return;
     }
+
+    if (this.pendingChatJobs.has(session.openCodeSessionId)) {
+      await ctx.reply('⏳ 当前 session 仍有进行中的请求，请等待完成或使用 /abort 中止。');
+      return;
+    }
+
     if (!session.telegramChatId) {
       session.telegramChatId = ctx.chat?.id.toString() || '';
     }
@@ -355,55 +391,38 @@ export class BotHandlers {
       this.logger.debug(
         `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request start textLength=${message.text.length}`
       );
-      const response = await this.opencode.sendMessageWithOverrides(
+      const messages = await this.opencode.listMessages(session.openCodeSessionId, 50, {
+        directory: session.directory,
+      });
+      const messageCountBefore = messages.filter((m) => m.info.role === 'assistant').length;
+
+      await this.opencode.sendMessageAsyncWithOverrides(
         session.openCodeSessionId,
         message.text,
         overrides,
         { directory: session.directory }
       );
 
-      this.logger.debug(
-        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request ok duration=${Date.now() - requestStartedAt}ms parts=${response.parts.length}`
-      );
+      const timeoutTimer = setTimeout(() => {
+        const job = this.pendingChatJobs.get(session!.openCodeSessionId);
+        if (!job) return;
+        this.pendingChatJobs.delete(session!.openCodeSessionId);
+        void this.bot.telegram.sendMessage(
+          job.chatId,
+          '⚠️ 请求超时，可能仍在等待权限确认或工具结果。\n\n请稍后用 /history 查看结果，或用 /abort 中止。'
+        ).catch(() => {});
+      }, BotHandlers.CHAT_JOB_TIMEOUT_MS);
+
+      this.pendingChatJobs.set(session.openCodeSessionId, {
+        chatId: session.telegramChatId,
+        startedAt: Date.now(),
+        messageCountBefore,
+        timeoutTimer,
+      });
 
       await ctx.deleteMessage(processingMsg.message_id);
 
-      const text = response.parts
-        .map((part) => typeof part.text === 'string' ? part.text : '')
-        .filter((part) => part.trim().length > 0)
-        .join('\n');
-      const formatted = formatCodeResponse(text).trim();
-
-      if (!formatted) {
-        const hasRunningTool = response.parts.some((part) => {
-          if (part.type !== 'tool') {
-            return false;
-          }
-
-          const state = part.metadata?.state;
-          return typeof state === 'object' && state !== null && (state as Record<string, unknown>).status === 'running';
-        });
-        const hasPermissionFlow = response.parts.some((part) => part.type === 'tool_use' || part.type === 'tool_result' || part.type === 'tool');
-        const pendingPermissions = this.permissionHandler.getPendingCount();
-        await ctx.reply(
-          pendingPermissions > 0
-            ? '🔐 已发出权限请求，请先在权限消息中选择允许或拒绝。'
-            : hasRunningTool || hasPermissionFlow
-              ? '⏳ 请求仍在处理中，可能正在等待权限确认或工具执行结果。若长时间没有弹窗，可回复 continue 或使用 /abort。'
-              : '✅ 请求已提交，但当前没有可显示的文本输出。'
-        );
-        return;
-      }
-
-      const maxLength = this.config.app.maxMessageLength;
-      if (formatted.length > maxLength) {
-        for (let i = 0; i < formatted.length; i += maxLength) {
-          const chunk = formatted.slice(i, i + maxLength);
-          await ctx.reply(chunk, { parse_mode: 'Markdown' }).catch(() => ctx.reply(chunk));
-        }
-      } else {
-        await ctx.reply(formatted, { parse_mode: 'Markdown' }).catch(() => ctx.reply(text));
-      }
+      await ctx.reply('🚀 请求已提交，处理中...\n\n如触发权限请求，我会单独向你发送确认按钮。');
     } catch (error) {
       const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       this.logger.error(
@@ -427,6 +446,74 @@ export class BotHandlers {
       } else {
         await ctx.reply(`❌ 错误: ${messageText}`);
       }
+    }
+  }
+
+  private async resolveChatJob(sessionID: string): Promise<void> {
+    const job = this.pendingChatJobs.get(sessionID);
+    if (!job) return;
+
+    this.pendingChatJobs.delete(sessionID);
+    clearTimeout(job.timeoutTimer);
+
+    try {
+      const activeSession = this.sessions.get();
+      const messages = await this.opencode.listMessages(sessionID, 50, {
+        directory: activeSession?.openCodeSessionId === sessionID ? activeSession.directory : undefined,
+      });
+      const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
+      const newAssistantMessages = assistantMessages.slice(job.messageCountBefore);
+
+      const textMessages = newAssistantMessages
+        .map((message) => ({
+          text: message.parts
+            .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
+            .map((part) => part.text as string)
+            .join('\n')
+            .trim(),
+        }))
+        .filter((message) => message.text.length > 0);
+
+      if (textMessages.length > 0) {
+        for (const message of textMessages) {
+          const formatted = formatCodeResponse(message.text).trim();
+          if (!formatted) continue;
+
+          if (formatted.length > this.config.app.maxMessageLength) {
+            for (let i = 0; i < formatted.length; i += this.config.app.maxMessageLength) {
+              const chunk = formatted.slice(i, i + this.config.app.maxMessageLength);
+              await this.bot.telegram.sendMessage(job.chatId, chunk, { parse_mode: 'Markdown' }).catch(() => this.bot.telegram.sendMessage(job.chatId, chunk));
+            }
+          } else {
+            await this.bot.telegram.sendMessage(job.chatId, formatted, { parse_mode: 'Markdown' }).catch(() => this.bot.telegram.sendMessage(job.chatId, message.text));
+          }
+        }
+        return;
+      }
+
+      const hasError = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'error'));
+      if (hasError) {
+        const errorText = newAssistantMessages
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === 'error')
+          .map((part) => typeof part.text === 'string' ? part.text : (typeof part.content === 'string' ? part.content : '未知错误'))
+          .filter((text) => text.trim().length > 0)
+          .join('\n');
+
+        await this.bot.telegram.sendMessage(job.chatId, `❌ 错误:\n${errorText || '请求执行失败'}`).catch(() => {});
+        return;
+      }
+
+      const hasRunningTool = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'tool'));
+      await this.bot.telegram.sendMessage(
+        job.chatId,
+        hasRunningTool
+          ? '⏳ 请求仍在处理中，可能正在等待权限确认或工具结果。若长时间无变化，可回复 continue 或使用 /abort。'
+          : '✅ 请求已完成，但当前没有可显示的文本输出。'
+      ).catch(() => {});
+    } catch (error) {
+      this.logger.error(`resolveChatJob failed session=${this.shortId(sessionID)}:`, error);
+      await this.bot.telegram.sendMessage(job.chatId, `❌ 获取结果失败: ${error}`).catch(() => {});
     }
   }
 

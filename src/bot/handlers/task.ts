@@ -109,6 +109,18 @@ export class TaskHandler {
 
       await ctx.deleteMessage(processingMsg.message_id);
 
+      const errorParts = response.parts.filter((part) => part.type === 'error');
+      if (errorParts.length > 0) {
+        const errorMessages = errorParts
+          .map((part) => typeof part.text === 'string' ? part.text : (typeof part.content === 'string' ? part.content : '未知错误'))
+          .filter((msg) => msg.trim().length > 0);
+        if (errorMessages.length > 0) {
+          const errorText = errorMessages.join('\n');
+          await ctx.reply(`❌ 错误:\n${errorText}`);
+          return;
+        }
+      }
+
       const text = response.parts
         .map((part) => typeof part.text === 'string' ? part.text : '')
         .filter((part) => part.trim().length > 0)

@@ -53,6 +53,7 @@ export class BotHandlers {
     chatId: string;
     startedAt: number;
     messageCountBefore: number;
+    processingMessageId: number;
     timeoutTimer: NodeJS.Timeout;
   }>();
 
@@ -192,7 +193,7 @@ export class BotHandlers {
     this.bot.command('plan', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'plan')));
     this.bot.command('build', this.withWhitelist((ctx) => this.modelHandler.handleNamedAgent(ctx, 'build')));
     this.bot.action(/^sessions:(\d+)(?::(.*))?$/, this.sessionHandler.handleSessionsPage.bind(this.sessionHandler));
-    this.bot.action(/^models:(page:\d+|set:\d+:\d+|noop)$/, this.modelHandler.handleModelAction.bind(this.modelHandler));
+    this.bot.action(/^models:(page:\d+|set:\d+|set:\d+:\d+|noop|provider:[^:]+|providers:page:\d+|provider:[^:]+:page:\d+|back:providers)$/, this.modelHandler.handleModelAction.bind(this.modelHandler));
 
     // File operations
     this.bot.command('ls', this.withWhitelist(this.fileHandler.handleListFiles.bind(this.fileHandler)));
@@ -407,22 +408,16 @@ export class BotHandlers {
         const job = this.pendingChatJobs.get(session!.openCodeSessionId);
         if (!job) return;
         this.pendingChatJobs.delete(session!.openCodeSessionId);
-        void this.bot.telegram.sendMessage(
-          job.chatId,
-          '⚠️ 请求超时，可能仍在等待权限确认或工具结果。\n\n请稍后用 /history 查看结果，或用 /abort 中止。'
-        ).catch(() => {});
+        void this.handleChatTimeout(session!.openCodeSessionId, session?.directory, job.chatId, job.processingMessageId);
       }, BotHandlers.CHAT_JOB_TIMEOUT_MS);
 
       this.pendingChatJobs.set(session.openCodeSessionId, {
         chatId: session.telegramChatId,
         startedAt: Date.now(),
         messageCountBefore,
+        processingMessageId: processingMsg.message_id,
         timeoutTimer,
       });
-
-      await ctx.deleteMessage(processingMsg.message_id);
-
-      await ctx.reply('🚀 请求已提交，处理中...\n\n如触发权限请求，我会单独向你发送确认按钮。');
     } catch (error) {
       const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       this.logger.error(
@@ -480,12 +475,14 @@ export class BotHandlers {
           if (!formatted) continue;
 
           if (formatted.length > this.config.app.maxMessageLength) {
+            await this.editOrSendChatMessage(job.chatId, job.processingMessageId, formatted.slice(0, this.config.app.maxMessageLength));
             for (let i = 0; i < formatted.length; i += this.config.app.maxMessageLength) {
+              if (i === 0) continue;
               const chunk = formatted.slice(i, i + this.config.app.maxMessageLength);
               await this.bot.telegram.sendMessage(job.chatId, chunk, { parse_mode: 'Markdown' }).catch(() => this.bot.telegram.sendMessage(job.chatId, chunk));
             }
           } else {
-            await this.bot.telegram.sendMessage(job.chatId, formatted, { parse_mode: 'Markdown' }).catch(() => this.bot.telegram.sendMessage(job.chatId, message.text));
+            await this.editOrSendChatMessage(job.chatId, job.processingMessageId, formatted, message.text);
           }
         }
         return;
@@ -500,21 +497,97 @@ export class BotHandlers {
           .filter((text) => text.trim().length > 0)
           .join('\n');
 
-        await this.bot.telegram.sendMessage(job.chatId, `❌ 错误:\n${errorText || '请求执行失败'}`).catch(() => {});
+        await this.editOrSendChatMessage(job.chatId, job.processingMessageId, `❌ 错误:\n${errorText || '请求执行失败'}`);
         return;
       }
 
       const hasRunningTool = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'tool'));
-      await this.bot.telegram.sendMessage(
+      await this.editOrSendChatMessage(
         job.chatId,
+        job.processingMessageId,
         hasRunningTool
           ? '⏳ 请求仍在处理中，可能正在等待权限确认或工具结果。若长时间无变化，可回复 continue 或使用 /abort。'
           : '✅ 请求已完成，但当前没有可显示的文本输出。'
-      ).catch(() => {});
+      );
     } catch (error) {
       this.logger.error(`resolveChatJob failed session=${this.shortId(sessionID)}:`, error);
-      await this.bot.telegram.sendMessage(job.chatId, `❌ 获取结果失败: ${error}`).catch(() => {});
+      await this.editOrSendChatMessage(job.chatId, job.processingMessageId, `❌ 获取结果失败: ${error}`);
     }
+  }
+
+  private async handleChatTimeout(
+    sessionID: string,
+    directory: string | undefined,
+    chatId: string,
+    processingMessageId?: number,
+  ): Promise<void> {
+    try {
+      const messages = await this.opencode.listMessages(sessionID, 20, { directory });
+      const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
+      const latestAssistant = assistantMessages[assistantMessages.length - 1];
+      const parts = latestAssistant?.parts || [];
+
+      const hasRunningTool = parts.some((part) => {
+        if (part.type !== 'tool') {
+          return false;
+        }
+
+        const toolPart = part as { state?: unknown; tool?: string };
+        if (!toolPart.state || typeof toolPart.state !== 'object') {
+          return false;
+        }
+
+        return (toolPart.state as Record<string, unknown>).status === 'running';
+      });
+
+      const hasText = parts.some((part) => part.type === 'text' && typeof part.text === 'string' && part.text.trim().length > 0);
+      const pendingPermissions = this.permissionHandler.getPendingCount();
+
+      let timeoutMessage = '⚠️ 请求超时，仍未拿到最终结果。\n\n请稍后用 /history 查看结果，或用 /abort 中止。';
+      if (pendingPermissions > 0) {
+        timeoutMessage = '🔐 请求超时，但仍有待处理的权限确认。\n\n请先在权限消息中选择允许或拒绝，然后再发送 continue。';
+      } else if (hasRunningTool && !hasText) {
+        timeoutMessage = '⏳ 请求超时，OpenCode 仍停留在工具执行阶段。\n\n这通常表示服务端没有把权限确认事件正确回传到 Telegram。你可以先用 /abort 中止，或到 OpenCode 侧继续处理。';
+      }
+
+      await this.editOrSendChatMessage(chatId, processingMessageId, timeoutMessage);
+    } catch (error) {
+      this.logger.error(`handleChatTimeout failed session=${this.shortId(sessionID)}:`, error);
+      await this.editOrSendChatMessage(
+        chatId,
+        processingMessageId,
+        '⚠️ 请求超时，且未能读取会话状态。\n\n请稍后用 /history 查看结果，或用 /abort 中止。'
+      );
+    }
+  }
+
+  private async editOrSendChatMessage(
+    chatId: string,
+    messageId: number | undefined,
+    text: string,
+    fallbackText?: string,
+  ): Promise<void> {
+    const content = text.trim();
+    if (!content) {
+      return;
+    }
+
+    if (messageId) {
+      try {
+        await this.bot.telegram.editMessageText(chatId, messageId, undefined, content, { parse_mode: 'Markdown' });
+        return;
+      } catch {
+        try {
+          await this.bot.telegram.editMessageText(chatId, messageId, undefined, content);
+          return;
+        } catch {
+          // fall through to send a new message
+        }
+      }
+    }
+
+    const plainText = (fallbackText || content).trim();
+    await this.bot.telegram.sendMessage(chatId, content, { parse_mode: 'Markdown' }).catch(() => this.bot.telegram.sendMessage(chatId, plainText)).catch(() => {});
   }
 
   private async handlePermissionAction(ctx: Context<Update.CallbackQueryUpdate>): Promise<void> {

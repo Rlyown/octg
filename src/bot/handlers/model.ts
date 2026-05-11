@@ -1,8 +1,20 @@
 import type { Context } from 'telegraf';
 import type { Message, Update } from 'telegraf/types';
-import type { RequestOverrides, TelegramSession } from '../../types.js';
+import type { RequestOverrides, TelegramSession, ConfigProviders } from '../../types.js';
 import type { HandlerContext } from './index.js';
 import { getLogger } from '../../logger.js';
+
+interface IndexedModel {
+  index: number;
+  provider: string;
+  model: string;
+  label: string;
+}
+
+interface ProviderGroup {
+  provider: string;
+  models: string[];
+}
 
 export class ModelHandler {
   private static readonly FALLBACK_MODEL = 'openai/gpt-5.4';
@@ -11,6 +23,8 @@ export class ModelHandler {
     subagent: 'subagent',
     all: 'all',
   };
+  private static readonly PROVIDERS_PER_PAGE = 8;
+  private static readonly MODELS_PER_PAGE = 8;
   private logger = getLogger('model');
 
   constructor(private hctx: HandlerContext) {}
@@ -44,10 +58,9 @@ export class ModelHandler {
       this.logger.info('listing available models');
       try {
         const config = await this.hctx.opencode.getConfigProviders();
-        const indexedModels = this.buildIndexedModels(config);
-        this.logger.info(`found ${config.providers.length} providers and ${indexedModels.length} models`);
-        await this.renderModelList(ctx, indexedModels, session, 1);
-        this.logger.info('model list sent successfully');
+        this.logger.info(`found ${config.providers.length} providers`);
+        await this.renderProviderList(ctx, config, session, 1);
+        this.logger.info('provider list sent successfully');
       } catch (error) {
         this.logger.error('failed to get model list:', error);
         await ctx.reply(`❌ 获取模型列表失败: ${error}`);
@@ -134,9 +147,9 @@ export class ModelHandler {
       return;
     }
 
-    const pageMatch = callbackData.match(/^models:page:(\d+)$/);
-    if (pageMatch) {
-      const page = Number.parseInt(pageMatch[1], 10);
+    const providerMatch = callbackData.match(/^models:provider:(.+)$/);
+    if (providerMatch) {
+      const providerName = providerMatch[1];
       const session = this.getCurrentSession();
       if (!session) {
         await ctx.answerCbQuery('当前没有可用会话');
@@ -145,10 +158,69 @@ export class ModelHandler {
 
       try {
         const config = await this.hctx.opencode.getConfigProviders();
-        await this.renderModelList(ctx, this.buildIndexedModels(config), session, page);
+        await this.renderModelListForProvider(ctx, config, providerName, session, 1);
         await ctx.answerCbQuery();
       } catch (error) {
         await ctx.answerCbQuery('加载模型失败');
+      }
+      return;
+    }
+
+    // Handle provider pagination
+    const providerPageMatch = callbackData.match(/^models:providers:page:(\d+)$/);
+    if (providerPageMatch) {
+      const page = Number.parseInt(providerPageMatch[1], 10);
+      const session = this.getCurrentSession();
+      if (!session) {
+        await ctx.answerCbQuery('当前没有可用会话');
+        return;
+      }
+
+      try {
+        const config = await this.hctx.opencode.getConfigProviders();
+        await this.renderProviderList(ctx, config, session, page);
+        await ctx.answerCbQuery();
+      } catch (error) {
+        await ctx.answerCbQuery('加载提供商失败');
+      }
+      return;
+    }
+
+    // Handle model pagination within provider
+    const modelPageMatch = callbackData.match(/^models:provider:(.+):page:(\d+)$/);
+    if (modelPageMatch) {
+      const providerName = modelPageMatch[1];
+      const page = Number.parseInt(modelPageMatch[2], 10);
+      const session = this.getCurrentSession();
+      if (!session) {
+        await ctx.answerCbQuery('当前没有可用会话');
+        return;
+      }
+
+      try {
+        const config = await this.hctx.opencode.getConfigProviders();
+        await this.renderModelListForProvider(ctx, config, providerName, session, page);
+        await ctx.answerCbQuery();
+      } catch (error) {
+        await ctx.answerCbQuery('加载模型失败');
+      }
+      return;
+    }
+
+    // Handle back to providers
+    if (callbackData === 'models:back:providers') {
+      const session = this.getCurrentSession();
+      if (!session) {
+        await ctx.answerCbQuery('当前没有可用会话');
+        return;
+      }
+
+      try {
+        const config = await this.hctx.opencode.getConfigProviders();
+        await this.renderProviderList(ctx, config, session, 1);
+        await ctx.answerCbQuery();
+      } catch (error) {
+        await ctx.answerCbQuery('加载提供商失败');
       }
       return;
     }
@@ -158,14 +230,13 @@ export class ModelHandler {
       return;
     }
 
-    const selectMatch = callbackData.match(/^models:set:(\d+):(\d+)$/);
+    const selectMatch = callbackData.match(/^models:set:(\d+)$/);
     if (!selectMatch) {
       await ctx.answerCbQuery('无效的模型请求');
       return;
     }
 
     const index = Number.parseInt(selectMatch[1], 10);
-    const page = Number.parseInt(selectMatch[2], 10);
     const session = this.getCurrentSession();
     if (!session) {
       await ctx.answerCbQuery('当前没有可用会话');
@@ -183,7 +254,7 @@ export class ModelHandler {
 
       session.preferredModel = matched.label;
       this.hctx.sessions.set(session);
-      await this.renderModelList(ctx, indexedModels, session, page, `✅ 已切换到 ${matched.label}`);
+      await this.renderModelListForProvider(ctx, config, matched.provider, session, 1, `✅ 已切换到 ${matched.label}`);
       await ctx.answerCbQuery(`已切换到 ${matched.model}`);
     } catch (error) {
       await ctx.answerCbQuery('切换模型失败');
@@ -287,13 +358,8 @@ export class ModelHandler {
     return undefined;
   }
 
-  private buildIndexedModels(config: { providers: Array<{ provider: string; models: string[] }> }): Array<{
-    index: number;
-    provider: string;
-    model: string;
-    label: string;
-  }> {
-    const entries: Array<{ index: number; provider: string; model: string; label: string }> = [];
+  private buildIndexedModels(config: ConfigProviders): IndexedModel[] {
+    const entries: IndexedModel[] = [];
     let index = 1;
 
     for (const provider of config.providers) {
@@ -311,41 +377,41 @@ export class ModelHandler {
     return entries;
   }
 
-  private async renderModelList(
+  private async renderProviderList(
     ctx: Context<Update.MessageUpdate> | Context<Update.CallbackQueryUpdate>,
-    indexedModels: Array<{ index: number; provider: string; model: string; label: string }>,
+    config: ConfigProviders,
     session: TelegramSession,
     page: number,
     toast?: string,
   ): Promise<void> {
-    const pageSize = 8;
-    const totalPages = Math.max(1, Math.ceil(indexedModels.length / pageSize));
+    const pageSize = ModelHandler.PROVIDERS_PER_PAGE;
+    const totalPages = Math.max(1, Math.ceil(config.providers.length / pageSize));
     const safePage = Math.min(Math.max(1, page), totalPages);
     const start = (safePage - 1) * pageSize;
-    const visibleModels = indexedModels.slice(start, start + pageSize);
+    const visibleProviders = config.providers.slice(start, start + pageSize);
     const currentModel = await this.getResolvedModelInfo(session);
 
-    const lines = visibleModels.map((entry) => {
-      const current = entry.label === currentModel ? ' 👈 当前' : '';
-      return `• ${entry.provider}/${entry.model}${current}`;
+    const lines = visibleProviders.map((provider) => {
+      const modelCount = provider.models.length;
+      return `• ${provider.provider} (${modelCount} 个模型)`;
     });
 
     const textParts = [
-      `🧠 可用模型 (${indexedModels.length})`,
+      `🏢 可用提供商 (${config.providers.length})`,
       '',
       `当前模型：${currentModel}`,
       '',
       lines.join('\n'),
       '',
       `页码: ${safePage}/${totalPages}`,
-      '点击下方按钮即可切换模型。',
+      '点击提供商名称查看其模型。',
     ];
 
     if (toast) {
       textParts.splice(2, 0, toast, '');
     }
 
-    const replyMarkup = this.buildModelPagination(visibleModels, safePage, totalPages, currentModel);
+    const replyMarkup = this.buildProviderPagination(visibleProviders, safePage, totalPages);
 
     if ('callback_query' in ctx.update && 'editMessageText' in ctx) {
       const callbackCtx = ctx as unknown as Context<Update.CallbackQueryUpdate>;
@@ -356,29 +422,140 @@ export class ModelHandler {
     await ctx.reply(textParts.join('\n'), { reply_markup: replyMarkup });
   }
 
-  private buildModelPagination(
-    visibleModels: Array<{ index: number; provider: string; model: string; label: string }>,
+  private buildProviderPagination(
+    visibleProviders: ProviderGroup[],
     currentPage: number,
     totalPages: number,
-    currentModel: string,
   ) {
-    const rows = visibleModels.map((entry) => [{
-      text: `${entry.label === currentModel ? '✅ ' : ''}${entry.provider}/${entry.model}`,
-      callback_data: `models:set:${entry.index}:${currentPage}`,
-    }]);
+    const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+
+    for (const provider of visibleProviders) {
+      rows.push([{
+        text: `🏢 ${provider.provider} (${provider.models.length})`,
+        callback_data: `models:provider:${provider.provider}`,
+      }]);
+    }
 
     const navigation: Array<{ text: string; callback_data: string }> = [];
     if (currentPage > 1) {
-      navigation.push({ text: '⬅️ Prev', callback_data: `models:page:${currentPage - 1}` });
+      navigation.push({ text: '⬅️ Prev', callback_data: `models:providers:page:${currentPage - 1}` });
     }
     navigation.push({ text: `${currentPage}/${totalPages}`, callback_data: 'models:noop' });
     if (currentPage < totalPages) {
-      navigation.push({ text: 'Next ➡️', callback_data: `models:page:${currentPage + 1}` });
+      navigation.push({ text: 'Next ➡️', callback_data: `models:providers:page:${currentPage + 1}` });
     }
 
     if (navigation.length > 0) {
       rows.push(navigation);
     }
+
+    return { inline_keyboard: rows };
+  }
+
+  private async renderModelListForProvider(
+    ctx: Context<Update.MessageUpdate> | Context<Update.CallbackQueryUpdate>,
+    config: ConfigProviders,
+    providerName: string,
+    session: TelegramSession,
+    page: number,
+    toast?: string,
+  ): Promise<void> {
+    const provider = config.providers.find(p => p.provider === providerName);
+    if (!provider) {
+      await this.renderProviderList(ctx, config, session, 1);
+      return;
+    }
+
+    const pageSize = ModelHandler.MODELS_PER_PAGE;
+    const totalPages = Math.max(1, Math.ceil(provider.models.length / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * pageSize;
+    const visibleModels = provider.models.slice(start, start + pageSize);
+    const currentModel = await this.getResolvedModelInfo(session);
+
+    const allModels = this.buildIndexedModels(config);
+
+    const lines = visibleModels.map((model) => {
+      const label = `${providerName}/${model}`;
+      const current = label === currentModel ? ' 👈 当前' : '';
+      return `• ${label}${current}`;
+    });
+
+    const textParts = [
+      `🧠 ${providerName} 的模型 (${provider.models.length})`,
+      '',
+      `当前模型：${currentModel}`,
+      '',
+      lines.join('\n'),
+      '',
+      `页码: ${safePage}/${totalPages}`,
+      '点击下方按钮切换模型。',
+    ];
+
+    if (toast) {
+      textParts.splice(2, 0, toast, '');
+    }
+
+    const replyMarkup = this.buildModelPaginationForProvider(
+      providerName,
+      visibleModels,
+      start,
+      allModels,
+      safePage,
+      totalPages,
+      currentModel
+    );
+
+    if ('callback_query' in ctx.update && 'editMessageText' in ctx) {
+      const callbackCtx = ctx as unknown as Context<Update.CallbackQueryUpdate>;
+      await callbackCtx.editMessageText(textParts.join('\n'), { reply_markup: replyMarkup });
+      return;
+    }
+
+    await ctx.reply(textParts.join('\n'), { reply_markup: replyMarkup });
+  }
+
+  private buildModelPaginationForProvider(
+    providerName: string,
+    visibleModels: string[],
+    startIndex: number,
+    allModels: IndexedModel[],
+    currentPage: number,
+    totalPages: number,
+    currentModel: string,
+  ) {
+    const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+
+    for (let i = 0; i < visibleModels.length; i++) {
+      const model = visibleModels[i];
+      const label = `${providerName}/${model}`;
+      const modelEntry = allModels.find(m => m.provider === providerName && m.model === model);
+      const index = modelEntry?.index || (startIndex + i + 1);
+      const isCurrent = label === currentModel;
+
+      rows.push([{
+        text: `${isCurrent ? '✅ ' : ''}${model}`,
+        callback_data: `models:set:${index}`,
+      }]);
+    }
+
+    const navigation: Array<{ text: string; callback_data: string }> = [];
+    if (currentPage > 1) {
+      navigation.push({ text: '⬅️ Prev', callback_data: `models:provider:${providerName}:page:${currentPage - 1}` });
+    }
+    navigation.push({ text: `${currentPage}/${totalPages}`, callback_data: 'models:noop' });
+    if (currentPage < totalPages) {
+      navigation.push({ text: 'Next ➡️', callback_data: `models:provider:${providerName}:page:${currentPage + 1}` });
+    }
+
+    if (navigation.length > 0) {
+      rows.push(navigation);
+    }
+
+    rows.push([{
+      text: '🔙 返回提供商列表',
+      callback_data: 'models:back:providers',
+    }]);
 
     return { inline_keyboard: rows };
   }

@@ -109,11 +109,16 @@ export class TaskHandler {
 
       await ctx.deleteMessage(processingMsg.message_id);
 
-      const text = response.parts.map(p => p.text).join('\n');
+      const text = response.parts
+        .map((part) => typeof part.text === 'string' ? part.text : '')
+        .filter((part) => part.trim().length > 0)
+        .join('\n')
+        .trim();
+
       if (text) {
         await ctx.reply(`\`\`\`\n${text}\n\`\`\``);
       } else {
-        await ctx.reply('✅ 命令执行完成');
+        await ctx.reply('✅ 命令执行完成（无可显示文本输出）');
       }
     } catch (error) {
       await ctx.reply(`❌ 执行失败: ${error}`);

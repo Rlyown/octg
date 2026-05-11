@@ -368,8 +368,21 @@ export class BotHandlers {
 
       await ctx.deleteMessage(processingMsg.message_id);
 
-      const text = response.parts.map(p => p.text).join('\n');
-      const formatted = formatCodeResponse(text);
+      const text = response.parts
+        .map((part) => typeof part.text === 'string' ? part.text : '')
+        .filter((part) => part.trim().length > 0)
+        .join('\n');
+      const formatted = formatCodeResponse(text).trim();
+
+      if (!formatted) {
+        const hasPermissionFlow = response.parts.some((part) => part.type === 'tool_use' || part.type === 'tool_result');
+        await ctx.reply(
+          hasPermissionFlow
+            ? '🔐 已发出权限请求，请先在权限消息中选择允许或拒绝。'
+            : '✅ 请求已提交，但当前没有可显示的文本输出。'
+        );
+        return;
+      }
 
       const maxLength = this.config.app.maxMessageLength;
       if (formatted.length > maxLength) {

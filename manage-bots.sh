@@ -546,8 +546,17 @@ cmd_add() {
     local dir
     dir="$(instance_dir "$name")"
     if [ -d "$dir" ]; then
+        if ! instance_has_env_files "$name"; then
+            print_warning "Found incomplete instance directory for $name; cleaning it up before recreate"
+            rm -rf "$dir"
+            rm -f "$(generated_launchd_path "$(launchd_bot_label "$name")")" "$(generated_launchd_path "$(launchd_server_label "$name")")"
+            rm -f "$(generated_systemd_path "$(systemd_bot_unit "$name")")" "$(generated_systemd_path "$(systemd_server_unit "$name")")"
+            rm -f "$(user_launchd_path "$(launchd_bot_label "$name")")" "$(user_launchd_path "$(launchd_server_label "$name")")"
+            rm -f "$(user_systemd_path "$(systemd_bot_unit "$name")")" "$(user_systemd_path "$(systemd_server_unit "$name")")"
+        else
         print_error "Instance already exists: $name"
         exit 1
+        fi
     fi
 
     mkdir -p "$dir" "$INSTANCES_DIR" "${SCRIPT_DIR}/logs/${name}"

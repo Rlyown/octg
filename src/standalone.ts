@@ -8,12 +8,24 @@ import { Notifier } from './bot/notifier.js';
 import { getLogger, initLogger } from './logger.js';
 import type { TelegramSession } from './types.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 
 const bootstrapLogger = getLogger('standalone');
 const startupLogger = getLogger('startup');
 
-const SESSION_FILE = process.env.OCTG_SESSION_FILE || './data/session.json';
+function resolveSessionFile(): string {
+  if (process.env.OCTG_SESSION_FILE) {
+    return process.env.OCTG_SESSION_FILE;
+  }
+
+  if (process.env.WHITELIST_FILE) {
+    return join(dirname(process.env.WHITELIST_FILE), 'session.json');
+  }
+
+  return './data/session.json';
+}
+
+const SESSION_FILE = resolveSessionFile();
 
 function loadSavedSession(): TelegramSession | null {
   try {
@@ -166,6 +178,11 @@ async function main() {
     originalSet(session);
     saveSession(session);
   };
+
+  const initialSession = sessionManager.get();
+  if (initialSession) {
+    saveSession(initialSession);
+  }
 
   // Create Telegram bot
   const bot = createBot(config.telegram);

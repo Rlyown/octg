@@ -33,8 +33,7 @@ export class BotHandlers {
     'config', 'providers', 'status_all', 'children',
     'init', 'symbol', 'git_status', 'tools',
   ]);
-  private static readonly CHAT_JOB_TIMEOUT_MS = 30 * 1000; // Reduced from 3 min to 30 sec for faster feedback
-  private static readonly CHAT_JOB_POLL_INTERVAL_MS = 5 * 1000; // Poll every 5 seconds as fallback
+  private static readonly CHAT_JOB_TIMEOUT_MS = 30 * 1000;
 
   private bot: Telegraf;
   private opencode: OpenCodeClient;
@@ -56,9 +55,7 @@ export class BotHandlers {
     messageCountBefore: number;
     processingMessageId: number;
     timeoutTimer: NodeJS.Timeout;
-    pollTimer?: NodeJS.Timeout;
   }>();
-  private pollInterval: NodeJS.Timeout | null = null;
 
   constructor(
     bot: Telegraf,
@@ -184,20 +181,6 @@ export class BotHandlers {
     });
 
     this.sseClient.start();
-    this.startChatJobPoller();
-  }
-
-  private startChatJobPoller(): void {
-    if (this.pollInterval) clearInterval(this.pollInterval);
-    this.pollInterval = setInterval(() => {
-      for (const [sessionID, job] of this.pendingChatJobs.entries()) {
-        const elapsedMs = Date.now() - job.startedAt;
-        if (elapsedMs > 10000) {
-          this.logger.debug(`Polling fallback: checking session=${this.shortId(sessionID)} elapsed=${elapsedMs}ms`);
-          void this.resolveChatJob(sessionID);
-        }
-      }
-    }, BotHandlers.CHAT_JOB_POLL_INTERVAL_MS);
   }
 
   private setupHandlers(): void {
@@ -548,7 +531,7 @@ export class BotHandlers {
         job.chatId,
         job.processingMessageId,
         hasRunningTool
-          ? '⏳ 请求仍在处理中，可能正在等待权限确认或工具结果。若长时间无变化，可回复 continue 或使用 /abort。'
+          ? '⏳ 请求仍在处理中，等待最终结果或权限确认。若长时间无变化，可使用 /abort 中止。'
           : '✅ 请求已完成，但当前没有可显示的文本输出。'
       );
     } catch (error) {

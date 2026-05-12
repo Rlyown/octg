@@ -434,6 +434,21 @@ export class BotHandlers {
         error.message.includes('timeout')
       );
 
+      const isFetchFailure = error instanceof Error && error.message.includes('fetch failed');
+
+      if (isTimeout || isFetchFailure) {
+        const handled = await this.handleBlockedChatRequest(
+          session.openCodeSessionId,
+          session.directory,
+          session.telegramChatId,
+          processingMsg.message_id,
+        );
+
+        if (handled) {
+          return;
+        }
+      }
+
       if (isTimeout) {
         this.logger.info(`user=${userId} session=${this.shortId(session.openCodeSessionId)} aborting session after timeout`);
         await this.opencode.abortSession(session.openCodeSessionId, { directory: session.directory }).catch(() => {});
@@ -469,6 +484,68 @@ export class BotHandlers {
       .filter((text) => text.length > 0)
       .join('\n')
       .trim();
+  }
+
+  private messageHasRunningTool(message?: MessageDetail): boolean {
+    if (!message) {
+      return false;
+    }
+
+    return message.parts.some((part) => {
+      if (part.type !== 'tool') {
+        return false;
+      }
+
+      const toolPart = part as { state?: unknown };
+      if (!toolPart.state || typeof toolPart.state !== 'object') {
+        return false;
+      }
+
+      return (toolPart.state as Record<string, unknown>).status === 'running';
+    });
+  }
+
+  private async handleBlockedChatRequest(
+    sessionID: string,
+    directory: string | undefined,
+    chatId: string,
+    processingMessageId?: number,
+  ): Promise<boolean> {
+    try {
+      const messages = await this.opencode.listMessages(sessionID, 20, { directory });
+      const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
+      const latestAssistant = assistantMessages[assistantMessages.length - 1];
+      if (!latestAssistant) {
+        return false;
+      }
+
+      const assistantText = this.extractDisplayText(latestAssistant);
+      const hasRunningTool = this.messageHasRunningTool(latestAssistant);
+      const pendingPermissions = this.permissionHandler.getPendingCount();
+
+      if (!hasRunningTool && pendingPermissions === 0) {
+        return false;
+      }
+
+      const summary = assistantText
+        ? `${assistantText}\n\n`
+        : '';
+
+      const guidance = pendingPermissions > 0
+        ? '🔐 当前请求正在等待权限确认。\n\n请在权限消息中选择允许或拒绝，然后再继续。'
+        : '⏳ 当前请求已经进入需要权限或工具执行的阶段，但 OpenCode 没有把权限事件回传到 Telegram。\n\n请到 OpenCode 侧继续处理，或使用 /abort 中止后再重试。';
+
+      await this.editOrSendChatMessage(
+        chatId,
+        processingMessageId,
+        `${summary}${guidance}`,
+        `${summary}${guidance}`,
+      );
+      return true;
+    } catch (error) {
+      this.logger.error(`handleBlockedChatRequest failed session=${this.shortId(sessionID)}:`, error);
+      return false;
+    }
   }
 
   private async editOrSendChatMessage(

@@ -10,6 +10,14 @@ export interface OpenCodeEvent {
 export type EventHandler = (event: OpenCodeEvent) => void;
 
 export class SSEClient {
+  private static readonly NAMED_EVENTS = [
+    'permission.asked',
+    'session.permission.requested',
+    'session.status',
+    'server.connected',
+    'server.heartbeat',
+  ] as const;
+
   private eventSource: EventSource | null = null;
   private baseUrl: string;
   private authHeader: string | null;
@@ -55,13 +63,14 @@ export class SSEClient {
     };
 
     this.eventSource.onmessage = (event: { data: string }) => {
-      try {
-        const parsed = JSON.parse(event.data) as OpenCodeEvent;
-        this.handleEvent(parsed);
-      } catch (error) {
-        this.logger.error('failed to parse message, raw:', event.data, error);
-      }
+      this.parseAndHandleEvent(event.data);
     };
+
+    for (const eventName of SSEClient.NAMED_EVENTS) {
+      this.eventSource.addEventListener(eventName, (event: Event & { data?: string }) => {
+        this.parseAndHandleEvent(event.data ?? '', eventName);
+      });
+    }
 
     this.eventSource.onerror = (error: unknown) => {
       const state = this.eventSource?.readyState;
@@ -127,6 +136,18 @@ export class SSEClient {
       } catch (error) {
         this.logger.error('event handler error:', error);
       }
+    }
+  }
+
+  private parseAndHandleEvent(raw: string, eventType?: string): void {
+    try {
+      const parsed = JSON.parse(raw) as Partial<OpenCodeEvent>;
+      this.handleEvent({
+        type: typeof parsed.type === 'string' && parsed.type.length > 0 ? parsed.type : (eventType || 'message'),
+        properties: parsed.properties,
+      });
+    } catch (error) {
+      this.logger.error('failed to parse message, raw:', raw, error);
     }
   }
 

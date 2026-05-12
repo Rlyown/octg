@@ -2,7 +2,7 @@ import type { Context, Telegraf } from 'telegraf';
 import type { Message, Update } from 'telegraf/types';
 import type { OpenCodeClient } from '../../opencode/client.js';
 import type { SessionManager } from '../../session/manager.js';
-import type { PluginConfig, TelegramSession } from '../../types.js';
+import type { MessageDetail, PluginConfig, TelegramSession } from '../../types.js';
 import { WhitelistManager } from '../../auth/whitelist.js';
 import { SSEClient } from '../../opencode/oc-event.js';
 import { PermissionHandler } from '../../opencode/permission-handler.js';
@@ -33,8 +33,6 @@ export class BotHandlers {
     'config', 'providers', 'status_all', 'children',
     'init', 'symbol', 'git_status', 'tools',
   ]);
-  private static readonly CHAT_JOB_TIMEOUT_MS = 30 * 1000;
-
   private bot: Telegraf;
   private opencode: OpenCodeClient;
   private sessions: SessionManager;
@@ -49,14 +47,6 @@ export class BotHandlers {
   private fileHandler: FileHandler;
   private taskHandler: TaskHandler;
   private generalHandler: GeneralHandler;
-  private pendingChatJobs = new Map<string, {
-    chatId: string;
-    startedAt: number;
-    messageCountBefore: number;
-    processingMessageId: number;
-    timeoutTimer: NodeJS.Timeout;
-  }>();
-
   constructor(
     bot: Telegraf,
     opencode: OpenCodeClient,
@@ -176,7 +166,6 @@ export class BotHandlers {
       if (props.status?.type === 'idle') {
         this.logger.debug(`SSE session.status idle event received for session=${this.shortId(sessionID)}`);
         void this.taskHandler.resolveTaskJob(sessionID);
-        void this.resolveChatJob(sessionID);
       }
     });
 
@@ -376,11 +365,6 @@ export class BotHandlers {
       return;
     }
 
-    if (this.pendingChatJobs.has(session.openCodeSessionId)) {
-      await ctx.reply('⏳ 当前 session 仍有进行中的请求，请等待完成或使用 /abort 中止。');
-      return;
-    }
-
     if (!session.telegramChatId) {
       session.telegramChatId = ctx.chat?.id.toString() || '';
     }
@@ -399,12 +383,7 @@ export class BotHandlers {
       this.logger.debug(
         `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request start textLength=${message.text.length}`
       );
-      const messages = await this.opencode.listMessages(session.openCodeSessionId, 50, {
-        directory: session.directory,
-      });
-      const messageCountBefore = messages.filter((m) => m.info.role === 'assistant').length;
-
-      await this.opencode.sendMessageAsyncWithOverrides(
+      const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
         message.text,
         overrides,
@@ -412,27 +391,36 @@ export class BotHandlers {
       );
 
       this.logger.info(
-        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request sent async messageCountBefore=${messageCountBefore}`
+        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request completed sync`
       );
 
-      const timeoutTimer = setTimeout(() => {
-        const job = this.pendingChatJobs.get(session!.openCodeSessionId);
-        if (!job) return;
-        this.logger.warn(`Chat job timeout for session=${this.shortId(session!.openCodeSessionId)} after ${BotHandlers.CHAT_JOB_TIMEOUT_MS}ms`);
-        this.pendingChatJobs.delete(session!.openCodeSessionId);
-        void this.handleChatTimeout(session!.openCodeSessionId, session?.directory, job.chatId, job.processingMessageId);
-      }, BotHandlers.CHAT_JOB_TIMEOUT_MS);
+      const errorText = response.parts
+        .filter((part) => part.type === 'error')
+        .map((part) => typeof part.text === 'string' ? part.text : (typeof part.content === 'string' ? part.content : '未知错误'))
+        .filter((text) => text.trim().length > 0)
+        .join('\n');
 
-      this.pendingChatJobs.set(session.openCodeSessionId, {
-        chatId: session.telegramChatId,
-        startedAt: Date.now(),
-        messageCountBefore,
-        processingMessageId: processingMsg.message_id,
-        timeoutTimer,
-      });
+      if (errorText) {
+        await this.editOrSendChatMessage(session.telegramChatId, processingMsg.message_id, `❌ 错误:\n${errorText}`);
+        return;
+      }
 
-      this.logger.info(
-        `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=job_queued timeout=${BotHandlers.CHAT_JOB_TIMEOUT_MS}ms`
+      const responseText = this.extractDisplayText(response as MessageDetail);
+      if (responseText) {
+        const formatted = formatCodeResponse(responseText).trim();
+        await this.editOrSendChatMessage(
+          session.telegramChatId,
+          processingMsg.message_id,
+          formatted || responseText,
+          responseText,
+        );
+        return;
+      }
+
+      await this.editOrSendChatMessage(
+        session.telegramChatId,
+        processingMsg.message_id,
+        '✅ 请求已完成，但当前没有可显示的文本输出。'
       );
     } catch (error) {
       const messageText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -460,130 +448,27 @@ export class BotHandlers {
     }
   }
 
-  private async resolveChatJob(sessionID: string): Promise<void> {
-    const job = this.pendingChatJobs.get(sessionID);
-    if (!job) {
-      this.logger.debug(`resolveChatJob: no pending job for session=${this.shortId(sessionID)}`);
-      return;
+  private extractDisplayText(message?: MessageDetail): string {
+    if (!message) {
+      return '';
     }
 
-    this.logger.info(`resolveChatJob: resolving session=${this.shortId(sessionID)} elapsed=${Date.now() - job.startedAt}ms`);
-    this.pendingChatJobs.delete(sessionID);
-    clearTimeout(job.timeoutTimer);
-
-    try {
-      const activeSession = this.sessions.get();
-      const messages = await this.opencode.listMessages(sessionID, 50, {
-        directory: activeSession?.openCodeSessionId === sessionID ? activeSession.directory : undefined,
-      });
-      const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
-      const newAssistantMessages = assistantMessages.slice(job.messageCountBefore);
-
-      this.logger.debug(`resolveChatJob: session=${this.shortId(sessionID)} newMessages=${newAssistantMessages.length}`);
-
-      const textMessages = newAssistantMessages
-        .map((message) => ({
-          text: message.parts
-            .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
-            .map((part) => part.text as string)
-            .join('\n')
-            .trim(),
-        }))
-        .filter((message) => message.text.length > 0);
-
-      if (textMessages.length > 0) {
-        this.logger.info(`resolveChatJob: session=${this.shortId(sessionID)} sending ${textMessages.length} text messages`);
-        for (const message of textMessages) {
-          const formatted = formatCodeResponse(message.text).trim();
-          if (!formatted) continue;
-
-          if (formatted.length > this.config.app.maxMessageLength) {
-            await this.editOrSendChatMessage(job.chatId, job.processingMessageId, formatted.slice(0, this.config.app.maxMessageLength));
-            for (let i = 0; i < formatted.length; i += this.config.app.maxMessageLength) {
-              if (i === 0) continue;
-              const chunk = formatted.slice(i, i + this.config.app.maxMessageLength);
-              await this.bot.telegram.sendMessage(job.chatId, chunk, { parse_mode: 'Markdown' }).catch(() => this.bot.telegram.sendMessage(job.chatId, chunk));
-            }
-          } else {
-            await this.editOrSendChatMessage(job.chatId, job.processingMessageId, formatted, message.text);
-          }
-        }
-        return;
-      }
-
-      const hasError = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'error'));
-      if (hasError) {
-        this.logger.info(`resolveChatJob: session=${this.shortId(sessionID)} has error messages`);
-        const errorText = newAssistantMessages
-          .flatMap((message) => message.parts)
-          .filter((part) => part.type === 'error')
-          .map((part) => typeof part.text === 'string' ? part.text : (typeof part.content === 'string' ? part.content : '未知错误'))
-          .filter((text) => text.trim().length > 0)
-          .join('\n');
-
-        await this.editOrSendChatMessage(job.chatId, job.processingMessageId, `❌ 错误:\n${errorText || '请求执行失败'}`);
-        return;
-      }
-
-      const hasRunningTool = newAssistantMessages.some((message) => message.parts.some((part) => part.type === 'tool'));
-      this.logger.info(`resolveChatJob: session=${this.shortId(sessionID)} hasRunningTool=${hasRunningTool}`);
-      await this.editOrSendChatMessage(
-        job.chatId,
-        job.processingMessageId,
-        hasRunningTool
-          ? '⏳ 请求仍在处理中，等待最终结果或权限确认。若长时间无变化，可使用 /abort 中止。'
-          : '✅ 请求已完成，但当前没有可显示的文本输出。'
-      );
-    } catch (error) {
-      this.logger.error(`resolveChatJob failed session=${this.shortId(sessionID)}:`, error);
-      await this.editOrSendChatMessage(job.chatId, job.processingMessageId, `❌ 获取结果失败: ${error}`);
-    }
-  }
-
-  private async handleChatTimeout(
-    sessionID: string,
-    directory: string | undefined,
-    chatId: string,
-    processingMessageId?: number,
-  ): Promise<void> {
-    try {
-      const messages = await this.opencode.listMessages(sessionID, 20, { directory });
-      const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
-      const latestAssistant = assistantMessages[assistantMessages.length - 1];
-      const parts = latestAssistant?.parts || [];
-
-      const hasRunningTool = parts.some((part) => {
-        if (part.type !== 'tool') {
-          return false;
+    return message.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => {
+        if (typeof part.text === 'string' && part.text.trim().length > 0) {
+          return part.text;
         }
 
-        const toolPart = part as { state?: unknown; tool?: string };
-        if (!toolPart.state || typeof toolPart.state !== 'object') {
-          return false;
+        if (typeof part.content === 'string' && part.content.trim().length > 0) {
+          return part.content;
         }
 
-        return (toolPart.state as Record<string, unknown>).status === 'running';
-      });
-
-      const hasText = parts.some((part) => part.type === 'text' && typeof part.text === 'string' && part.text.trim().length > 0);
-      const pendingPermissions = this.permissionHandler.getPendingCount();
-
-      let timeoutMessage = '⚠️ 请求超时，仍未拿到最终结果。\n\n请稍后用 /history 查看结果，或用 /abort 中止。';
-      if (pendingPermissions > 0) {
-        timeoutMessage = '🔐 请求超时，但仍有待处理的权限确认。\n\n请先在权限消息中选择允许或拒绝，然后再发送 continue。';
-      } else if (hasRunningTool && !hasText) {
-        timeoutMessage = '⏳ 请求超时，OpenCode 仍停留在工具执行阶段。\n\n这通常表示服务端没有把权限确认事件正确回传到 Telegram。你可以先用 /abort 中止，或到 OpenCode 侧继续处理。';
-      }
-
-      await this.editOrSendChatMessage(chatId, processingMessageId, timeoutMessage);
-    } catch (error) {
-      this.logger.error(`handleChatTimeout failed session=${this.shortId(sessionID)}:`, error);
-      await this.editOrSendChatMessage(
-        chatId,
-        processingMessageId,
-        '⚠️ 请求超时，且未能读取会话状态。\n\n请稍后用 /history 查看结果，或用 /abort 中止。'
-      );
-    }
+        return '';
+      })
+      .filter((text) => text.length > 0)
+      .join('\n')
+      .trim();
   }
 
   private async editOrSendChatMessage(

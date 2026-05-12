@@ -10,6 +10,7 @@ dist/
 .env.legacy-*.backup
 .env.local
 .env.*.local
+instances/
 instances/*/bot.env
 instances/*/server.env
 instances/*/meta.env

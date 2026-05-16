@@ -383,6 +383,8 @@ export class BotHandlers {
       this.logger.debug(
         `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request start textLength=${message.text.length}`
       );
+      await this.prepareSessionForNewMessage(session.openCodeSessionId, session.directory);
+
       const response = await this.opencode.sendMessageWithOverrides(
         session.openCodeSessionId,
         message.text,
@@ -394,11 +396,7 @@ export class BotHandlers {
         `user=${userId} session=${this.shortId(session.openCodeSessionId)} stage=message_request completed sync`
       );
 
-      const errorText = response.parts
-        .filter((part) => part.type === 'error')
-        .map((part) => typeof part.text === 'string' ? part.text : (typeof part.content === 'string' ? part.content : '未知错误'))
-        .filter((text) => text.trim().length > 0)
-        .join('\n');
+      const errorText = this.extractResponseErrorText(response as MessageDetail);
 
       if (errorText) {
         await this.editOrSendChatMessage(session.telegramChatId, processingMsg.message_id, `❌ 错误:\n${errorText}`);
@@ -414,6 +412,16 @@ export class BotHandlers {
           formatted || responseText,
           responseText,
         );
+        return;
+      }
+
+      const handledNonText = await this.handleNonTextSyncResponse(
+        response as MessageDetail,
+        session.telegramChatId,
+        processingMsg.message_id,
+      );
+
+      if (handledNonText) {
         return;
       }
 
@@ -486,6 +494,40 @@ export class BotHandlers {
       .trim();
   }
 
+  private extractResponseErrorText(message?: MessageDetail): string {
+    if (!message) {
+      return '';
+    }
+
+    const partErrors = message.parts
+      .filter((part) => part.type === 'error')
+      .map((part) => typeof part.text === 'string' ? part.text : (typeof part.content === 'string' ? part.content : ''))
+      .filter((text) => text.trim().length > 0);
+
+    const info = message.info as unknown as Record<string, unknown>;
+    const rawInfoError = info.error;
+    let infoError = '';
+
+    if (typeof rawInfoError === 'string') {
+      infoError = rawInfoError;
+    } else if (rawInfoError && typeof rawInfoError === 'object') {
+      const errorRecord = rawInfoError as Record<string, unknown>;
+      const data = errorRecord.data && typeof errorRecord.data === 'object'
+        ? errorRecord.data as Record<string, unknown>
+        : undefined;
+      infoError = [
+        typeof errorRecord.name === 'string' ? errorRecord.name : '',
+        typeof data?.message === 'string' ? data.message : '',
+        typeof errorRecord.message === 'string' ? errorRecord.message : '',
+      ].filter((text) => text.trim().length > 0).join(': ');
+    }
+
+    return [...partErrors, infoError]
+      .filter((text) => text.trim().length > 0)
+      .join('\n')
+      .trim();
+  }
+
   private messageHasRunningTool(message?: MessageDetail): boolean {
     if (!message) {
       return false;
@@ -503,6 +545,43 @@ export class BotHandlers {
 
       return (toolPart.state as Record<string, unknown>).status === 'running';
     });
+  }
+
+  private messageHasToolArtifacts(message?: MessageDetail): boolean {
+    if (!message) {
+      return false;
+    }
+
+    return message.parts.some((part) => (
+      part.type === 'tool'
+      || part.type === 'tool_use'
+      || part.type === 'tool_result'
+      || part.type === 'step-start'
+      || part.type === 'step-finish'
+    ));
+  }
+
+  private async handleNonTextSyncResponse(
+    response: MessageDetail,
+    chatId: string,
+    processingMessageId?: number,
+  ): Promise<boolean> {
+    const pendingPermissions = this.permissionHandler.getPendingCount();
+    const hasRunningTool = this.messageHasRunningTool(response);
+    const hasToolArtifacts = this.messageHasToolArtifacts(response);
+
+    if (!hasRunningTool && !hasToolArtifacts && pendingPermissions === 0) {
+      return false;
+    }
+
+    const guidance = pendingPermissions > 0
+      ? '🔐 当前请求正在等待权限确认。\n\n请在权限消息中选择允许或拒绝，然后再继续。'
+      : hasRunningTool
+        ? '⏳ 当前请求已经进入工具执行阶段，但还没有生成最终文本回复。\n\n请稍等片刻，或到 OpenCode 侧查看执行状态。'
+        : '🛠️ 当前请求返回了工具状态或结果，但没有生成可显示的文本总结。\n\n请到 OpenCode 侧查看详细结果，或让我继续总结这次执行结果。';
+
+    await this.editOrSendChatMessage(chatId, processingMessageId, guidance, guidance);
+    return true;
   }
 
   private async handleBlockedChatRequest(
@@ -545,6 +624,26 @@ export class BotHandlers {
     } catch (error) {
       this.logger.error(`handleBlockedChatRequest failed session=${this.shortId(sessionID)}:`, error);
       return false;
+    }
+  }
+
+  private async prepareSessionForNewMessage(
+    sessionID: string,
+    directory: string | undefined,
+  ): Promise<void> {
+    try {
+      const messages = await this.opencode.listMessages(sessionID, 20, { directory });
+      const assistantMessages = messages.filter((message) => message.info.role === 'assistant');
+      const latestAssistant = assistantMessages[assistantMessages.length - 1];
+
+      if (!this.messageHasRunningTool(latestAssistant)) {
+        return;
+      }
+
+      this.logger.warn(`session=${this.shortId(sessionID)} has stale running tool; aborting before new message`);
+      await this.opencode.abortSession(sessionID, { directory }).catch(() => {});
+    } catch (error) {
+      this.logger.warn(`prepareSessionForNewMessage failed session=${this.shortId(sessionID)}: ${error}`);
     }
   }
 
